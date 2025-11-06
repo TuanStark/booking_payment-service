@@ -4,7 +4,9 @@ pipeline {
     environment {
         SERVICE_NAME = 'payment-service'
         SERVICE_PORT = '3005'
-        DOCKER_IMAGE = "dorm-booking/${SERVICE_NAME}"
+        // Repository name trên Docker Hub: chỉ được có 1 dấu "/" (username/repo-name)
+        // Không được dùng format: username/namespace/repo-name (2 dấu "/")
+        DOCKER_IMAGE = "${SERVICE_NAME}"  // Sẽ thành: tuanstark/payment-service
         DOCKER_TAG = "${BUILD_NUMBER}"
         NODE_VERSION = '18'
         DATABASE_URL = credentials('database-url')
@@ -28,141 +30,131 @@ pipeline {
                         script: "git rev-parse --short HEAD",
                         returnStdout: true
                     ).trim()
-                    
-                    // Kiểm tra thay đổi (chỉ trên các branch khác main)
-                    if (env.BRANCH_NAME != 'main') {
-                        def changedFiles = sh(
-                            script: """
-                                if [ -n "\${GIT_PREVIOUS_SUCCESSFUL_COMMIT}" ]; then
-                                    git diff --name-only \${GIT_PREVIOUS_SUCCESSFUL_COMMIT} \${GIT_COMMIT}
-                                else
-                                    git diff --name-only HEAD~1 HEAD
-                                fi
-                            """,
-                            returnStdout: true
-                        ).trim()
-                        
-                        def serviceChanged = changedFiles.contains("services/${SERVICE_NAME}/")
-                        def sharedChanged = changedFiles.contains("shared/")
-                        
-                        if (!serviceChanged && !sharedChanged && changedFiles) {
-                            echo "No changes detected in ${SERVICE_NAME} or shared/, skipping build"
-                            env.SKIP_BUILD = 'true'
-                        } else {
-                            env.SKIP_BUILD = 'false'
-                        }
-                    } else {
-                        env.SKIP_BUILD = 'false'
-                    }
                 }
             }
         }
         
         stage('Install Dependencies') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
-                dir("services/${SERVICE_NAME}") {
-                    sh 'npm ci'
-                }
+                sh 'npm ci'
             }
         }
         
         stage('Lint & Format') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
-                dir("services/${SERVICE_NAME}") {
-                    sh 'npm run lint'
-                    sh 'npm run format'
-                }
+                sh 'npm run lint'
+                sh 'npm run format'
             }
         }
         
         stage('Database Migration') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
-                dir("services/${SERVICE_NAME}") {
-                    sh 'npx prisma generate'
-                    sh 'npx prisma migrate deploy'
-                }
+                sh 'npx prisma generate'
+                sh 'npx prisma migrate deploy'
             }
         }
         
         stage('Unit Tests') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
-                dir("services/${SERVICE_NAME}") {
-                    sh 'npm test -- --coverage --watchAll=false'
-                }
+                sh 'npm test -- --coverage --watchAll=false'
             }
             post {
                 always {
-                    publishTestResults testResultsPattern: 'services/payment-service/coverage/test-results.xml'
+                    publishTestResults testResultsPattern: 'coverage/test-results.xml'
                     publishCoverage adapters: [
-                        jacocoAdapter('services/payment-service/coverage/lcov.info')
+                        jacocoAdapter('coverage/lcov.info')
                     ], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
                 }
             }
         }
         
         stage('Build Application') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
-                dir("services/${SERVICE_NAME}") {
-                    sh 'npm run build'
-                }
+                sh 'npm run build'
             }
         }
         
         stage('Build Docker Image') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
                 script {
-                    docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}", "-f services/${SERVICE_NAME}/Dockerfile services/${SERVICE_NAME}")
+                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -f ./Dockerfile ."
                 }
             }
         }
         
         stage('Security Scan') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
                 script {
-                    sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    // Kiểm tra xem trivy có sẵn không
+                    def trivyAvailable = sh(
+                        script: 'which trivy || command -v trivy',
+                        returnStatus: true
+                    ) == 0
+                    
+                    if (trivyAvailable) {
+                        sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    } else {
+                        echo "⚠️ Trivy not found, skipping security scan. Install trivy to enable security scanning."
+                    }
                 }
             }
         }
 
         stage('Push Docker Image') {
-            when {
-                expression { env.SKIP_BUILD != 'true' }
-            }
             steps {
                 script {
-                    // Image name trên Docker Hub: username/repo-name:tag
-                    def dockerHubImage = "${DOCKER_HUB_USERNAME}/${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    def dockerHubImageLatest = "${DOCKER_HUB_USERNAME}/${DOCKER_IMAGE}:latest"
-                    
-                    docker.withRegistry("${DOCKER_REGISTRY}", "${DOCKER_CREDENTIALS_ID}") {
-                        // Tag image với Docker Hub username
-                        sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${dockerHubImage}"
-                        sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${dockerHubImageLatest}"
+                    // Login to Docker Hub (sử dụng withCredentials để tránh expose secret)
+                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        // Sử dụng sh với script block để tránh string interpolation
+                        sh """
+                            set +x  # Ẩn command để tránh expose password trong logs
+                            echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin ${DOCKER_REGISTRY} || {
+                                echo "❌ Docker login failed. Please check:"
+                                echo "   1. Credentials ID '${DOCKER_CREDENTIALS_ID}' exists in Jenkins"
+                                echo "   2. Username and password are correct"
+                                echo "   3. Docker Hub account is active"
+                                exit 1
+                            }
+                            set -x
+                            
+                            # Image name trên Docker Hub: username/repo-name:tag
+                            # Docker Hub sẽ tự động tạo repository khi push lần đầu
+                            DOCKER_HUB_IMAGE="\${DOCKER_USER}/${DOCKER_IMAGE}"
+                            
+                            # Tag image với Docker Hub username
+                            echo "🏷️  Tagging image: ${DOCKER_IMAGE}:${DOCKER_TAG} -> \${DOCKER_HUB_IMAGE}:${DOCKER_TAG}"
+                            docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} \${DOCKER_HUB_IMAGE}:${DOCKER_TAG}
+                            
+                            echo "🏷️  Tagging image: ${DOCKER_IMAGE}:${DOCKER_TAG} -> \${DOCKER_HUB_IMAGE}:latest"
+                            docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} \${DOCKER_HUB_IMAGE}:latest
+                            
+                            # Push cả 2 tags (Docker Hub sẽ tự tạo repo nếu chưa tồn tại)
+                            echo "📤 Pushing image: \${DOCKER_HUB_IMAGE}:${DOCKER_TAG}"
+                            docker push \${DOCKER_HUB_IMAGE}:${DOCKER_TAG} || {
+                                echo "❌ Push failed with 'insufficient_scope' error!"
+                                echo ""
+                                echo "🔍 This usually means your Access Token doesn't have write permissions."
+                                echo ""
+                                echo "✅ Solution:"
+                                echo "   1. Go to: https://hub.docker.com/settings/security"
+                                echo "   2. Create a NEW Access Token with 'Read, Write & Delete' permissions"
+                                echo "   3. Update Jenkins credentials '${DOCKER_CREDENTIALS_ID}' with the new token"
+                                echo "   4. Make sure to use Access Token (not password) in credentials"
+                                echo ""
+                                echo "📝 Current repository: \${DOCKER_HUB_IMAGE}"
+                                exit 1
+                            }
+                            
+                            echo "📤 Pushing image: \${DOCKER_HUB_IMAGE}:latest"
+                            docker push \${DOCKER_HUB_IMAGE}:latest || {
+                                echo "⚠️ Warning: Failed to push 'latest' tag, but version tag was pushed successfully"
+                            }
+                            
+                            echo "✅ Successfully pushed images to Docker Hub"
+                        """
                         
-                        // Push cả 2 tags
-                        sh "docker push ${dockerHubImage}"
-                        sh "docker push ${dockerHubImageLatest}"
+                        // Logout
+                        sh "docker logout ${DOCKER_REGISTRY}"
                     }
                 }
             }
