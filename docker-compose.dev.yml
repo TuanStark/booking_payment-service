@@ -1,0 +1,42 @@
+version: '3.9'
+
+services:
+  payment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: payment-service-dev
+    ports:
+      - "3006:3006"
+    environment:
+      PORT: 3006
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_HOST: redis-payment
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_TTL: ${REDIS_TTL}
+      KAFKA_BROKER: ${KAFKA_BROKER}
+      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE}
+      VIETQR_ACCOUNT_NO: ${VIETQR_ACCOUNT_NO}
+      VIETQR_ACQ_ID: ${VIETQR_ACQ_ID}
+      VIETQR_ACCOUNT_NAME: ${VIETQR_ACCOUNT_NAME}
+      IMAP_HOST: ${IMAP_HOST}
+      IMAP_PORT: ${IMAP_PORT}
+      IMAP_USER: ${IMAP_USER}
+      IMAP_PASS: ${IMAP_PASS}
+      NODE_ENV: development
+    volumes:
+      - ./src:/app/src
+      - ./prisma:/app/prisma
+      - ./node_modules:/app/node_modules
+    command: npm run start:dev
+    networks:
+      my_custom_network:
+        ip4_address: ${APP_IP}
+
+
+networks:
+  my_custom_network:
+    external: true
+

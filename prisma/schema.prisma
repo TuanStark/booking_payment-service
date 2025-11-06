@@ -1,0 +1,46 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  userId        String        @map("user_id")
+  bookingId     String        @map("booking_id")
+  amount        Float
+  method        PaymentMethod
+  qrImageUrl    String?       @map("qr_image_url")
+  paymentUrl    String?       @map("payment_url")
+  transactionId String?       @map("transaction_id") // từ bank / VNPAY nếu có
+  reference     String?       // mã bạn chèn trong nội dung chuyển khoản (e.g. BOOKING_123)
+  status        PaymentStatus @default(PENDING)
+  paymentDate   DateTime?     @map("payment_date") // thời gian thanh toán thành công
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@index([bookingId])
+  @@index([userId])
+  @@index([status])
+  @@map("payments")
+}
+
+enum PaymentMethod {
+  VIETQR
+  VNPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}

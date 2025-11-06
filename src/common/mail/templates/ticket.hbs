@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>🎬 Vé Xem Phim - {{title}}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .email-container {
+      max-width: 650px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    }
+    .header {
+      background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+      position: relative;
+    }
+    .header::before {
+      content: '🎬';
+      font-size: 60px;
+      display: block;
+      margin-bottom: 10px;
+    }
+    .header h1 {
+      font-size: 28px;
+      margin-bottom: 5px;
+      font-weight: 700;
+    }
+    .header p {
+      font-size: 16px;
+      opacity: 0.9;
+    }
+    .ticket-container {
+      position: relative;
+      background: #fff;
+    }
+    .ticket {
+      background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+      margin: 30px;
+      border-radius: 15px;
+      overflow: hidden;
+      border: 2px dashed #dee2e6;
+      position: relative;
+    }
+    .ticket::before,
+    .ticket::after {
+      content: '';
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      background: #fff;
+      border-radius: 50%;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 2;
+    }
+    .ticket::before { left: -15px; }
+    .ticket::after { right: -15px; }
+    .ticket-header {
+      background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+      color: white;
+      padding: 25px;
+      text-align: center;
+    }
+    .movie-title {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .booking-code {
+      background: rgba(255,255,255,0.2);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 16px;
+      font-weight: bold;
+      display: inline-block;
+      margin-top: 10px;
+    }
+    .ticket-body {
+      padding: 30px;
+    }
+    .ticket-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px 0;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .ticket-row:last-child {
+      border-bottom: none;
+      font-weight: bold;
+      font-size: 18px;
+      color: #e74c3c;
+    }
+    .ticket-label {
+      font-weight: 600;
+      color: #495057;
+      display: flex;
+      align-items: center;
+    }
+    .ticket-label::before {
+      margin-right: 10px;
+      font-size: 18px;
+    }
+    .ticket-value {
+      font-weight: 500;
+      color: #212529;
+    }
+    .seat-list {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .seat-item {
+      background: #e3f2fd;
+      color: #1976d2;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .date-time {
+      background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+      color: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 10px;
+      text-align: center;
+    }
+    .date-time-row {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 15px;
+    }
+    .date-time-item {
+      text-align: center;
+    }
+    .date-time-label {
+      font-size: 12px;
+      opacity: 0.8;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .date-time-value {
+      font-size: 20px;
+      font-weight: bold;
+      margin-top: 5px;
+    }
+    .instructions {
+      background: #fff3cd;
+      border: 1px solid #ffeaa7;
+      border-radius: 10px;
+      padding: 20px;
+      margin: 20px 30px;
+    }
+    .instructions h3 {
+      color: #856404;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+    }
+    .instructions h3::before {
+      content: '⚠️';
+      margin-right: 10px;
+    }
+    .instructions p {
+      color: #856404;
+      line-height: 1.6;
+    }
+    .footer {
+      background: #f8f9fa;
+      padding: 30px;
+      text-align: center;
+      color: #6c757d;
+    }
+    .footer h3 {
+      color: #495057;
+      margin-bottom: 15px;
+    }
+    .contact-info {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #dee2e6;
+    }
+    .success-badge {
+      background: linear-gradient(135deg, #00b894 0%, #00a085 100%);
+      color: white;
+      padding: 15px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 18px;
+    }
+    .success-badge::before {
+      content: '✅';
+      margin-right: 10px;
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="email-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>MOVIE TIX</h1>
+      <p>Vé Xem Phim Điện Tử</p>
+    </div>
+
+    <!-- Success Badge -->
+    <div class="success-badge">
+      THANH TOÁN THÀNH CÔNG
+    </div>
+
+    <!-- Ticket -->
+    <div class="ticket-container">
+      <div class="ticket">
+        <!-- Ticket Header -->
+        <div class="ticket-header">
+          <div class="movie-title">{{title}}</div>
+          <div class="booking-code">{{bookingCode}}</div>
+        </div>
+
+        <!-- Date & Time Section -->
+        <div class="date-time">
+          <div style="font-size: 16px; margin-bottom: 10px;">LỊCH CHIẾU</div>
+          <div class="date-time-row" style="display: flex; justify-content: space-between;">
+            <div class="date-time-item">
+              <div class="date-time-label">Ngày</div>
+              <div class="date-time-value">{{date}}</div>
+            </div>
+            <div class="date-time-item">
+              <div class="date-time-label">Giờ</div>
+              <div class="date-time-value">{{time}}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ticket Details -->
+        <div class="ticket-body">
+          <div class="ticket-row">
+            <div class="ticket-label" style="--icon: '👤';">Khách hàng: </div>
+            <div class="ticket-value">{{firstName}} {{lastName}}</div>
+          </div>
+
+          <div class="ticket-row">
+            <div class="ticket-label" style="--icon: '🎭';">Rạp chiếu: </div>
+            <div class="ticket-value">{{theater}}</div>
+          </div>
+
+          <div class="ticket-row">
+            <div class="ticket-label" style="--icon: '🪑';">Ghế ngồi: </div>
+            <div class="ticket-value">
+              <div class="seat-list">
+                {{#each seats}}
+                  <span class="seat-item">{{this.row}}{{this.number}}</span>
+                {{/each}}
+              </div>
+            </div>
+          </div>
+
+          <div class="ticket-row">
+            <div class="ticket-label" style="--icon: '💳';">Thanh toán: </div>
+            <div class="ticket-value">{{paymentMethod}}</div>
+          </div>
+
+          <div class="ticket-row">
+            <div class="ticket-label" style="--icon: '📅';">Ngày đặt: </div>
+            <div class="ticket-value">{{bookingDate}}</div>
+          </div>
+
+          <div class="ticket-row">
+            <div class="ticket-label" style="--icon: '💰';">Tổng tiền: </div>
+            <div class="ticket-value" style="color: #e74c3c; font-size: 18px;">{{totalPrice}} VND</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="instructions">
+      <h3>Hướng dẫn sử dụng vé</h3>
+      <p>• Vui lòng có mặt tại rạp ít nhất <strong>15 phút</strong> trước giờ chiếu</p>
+      <p>• Xuất trình mã đặt vé: <strong>{{bookingCode}}</strong> tại quầy vé</p>
+      <p>• Mang theo giấy tờ tùy thân để đối chiếu thông tin</p>
+      <p>• Vé không được hoàn trả sau khi đã thanh toán</p>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <h3>🎬 MOVIE TIX</h3>
+      <p>Cảm ơn bạn đã tin tương và sử dụng dịch vụ của chúng tôi!</p>
+      <p>Chúc bạn có những phút giây giải trí tuyệt vời!</p>
+
+      <div class="contact-info">
+        <p><strong>Hỗ trợ khách hàng:</strong></p>
+        <p>📧 Email: support@cinemabooking.com</p>
+        <p>📞 Hotline: 1900-1234</p>
+        <p>🌐 Website: www.cinemabooking.com</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
