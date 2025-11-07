@@ -26,9 +26,11 @@ export class PaymentsService {
   // create payment and return record + qr url
   async createPayment(userId: string, dto: CreatePaymentDto) {
     if (!dto.bookingId || !dto.amount || !dto.method) {
-      throw new BadRequestException('Missing required fields: bookingId, amount, method');
+      throw new BadRequestException(
+        'Missing required fields: bookingId, amount, method',
+      );
     }
-    
+
     const provider = this.providerFor(dto.method);
     const { qrImageUrl, paymentUrl, reference } = await provider.createPayment({
       amount: dto.amount,
@@ -41,7 +43,7 @@ export class PaymentsService {
         userId: userId,
         bookingId: dto.bookingId,
         amount: dto.amount,
-        method: dto.method as PaymentMethod,
+        method: dto.method,
         qrImageUrl: qrImageUrl || undefined,
         paymentUrl: paymentUrl || undefined,
         reference: reference || undefined,
@@ -54,7 +56,11 @@ export class PaymentsService {
   }
 
   // update status and publish rabbitmq
-  async updateStatusByPaymentId(paymentId: string, status: PaymentStatus, transactionId?: string) {
+  async updateStatusByPaymentId(
+    paymentId: string,
+    status: PaymentStatus,
+    transactionId?: string,
+  ) {
     const payment = await this.prisma.payment.update({
       where: { id: paymentId },
       data: {
@@ -64,7 +70,8 @@ export class PaymentsService {
       },
     });
 
-    const topic = status === PaymentStatus.SUCCESS ? 'payment.success' : 'payment.failed';
+    const topic =
+      status === PaymentStatus.SUCCESS ? 'payment.success' : 'payment.failed';
     await this.rabbitmq.emitPaymentEvent(topic, {
       paymentId: payment.id,
       bookingId: payment.bookingId,
@@ -78,7 +85,11 @@ export class PaymentsService {
     return payment;
   }
 
-  async verifyPaymentFromEmail(data: { bookingId: string; amount: number; rawMessage: string }) {
+  async verifyPaymentFromEmail(data: {
+    bookingId: string;
+    amount: number;
+    rawMessage: string;
+  }) {
     const { bookingId, amount } = data;
 
     const payment = await this.prisma.payment.findFirst({
@@ -106,7 +117,9 @@ export class PaymentsService {
       reference: payment.reference || undefined,
     });
 
-    this.logger.log(`✅ Payment verified for booking ${bookingId}, event pushed.`);
+    this.logger.log(
+      `✅ Payment verified for booking ${bookingId}, event pushed.`,
+    );
   }
 
   async getPayment(paymentId: string) {
@@ -255,7 +268,7 @@ export class PaymentsService {
     const { year, startDate, endDate, method } = filters;
 
     const currentYear = year ? Number(year) : new Date().getFullYear();
-    
+
     // Validate year
     if (isNaN(currentYear) || currentYear < 2000 || currentYear > 2100) {
       throw new Error('Invalid year');
@@ -265,7 +278,7 @@ export class PaymentsService {
     const start = startDate
       ? new Date(startDate)
       : new Date(currentYear, 0, 1, 0, 0, 0, 0); // Đầu năm
-    
+
     const end = endDate
       ? new Date(endDate)
       : new Date(currentYear, 11, 31, 23, 59, 59, 999); // Cuối năm
@@ -317,9 +330,9 @@ export class PaymentsService {
     // Nếu có startDate/endDate riêng lẻ (không phải cả năm) thì chỉ hiển thị tháng có data
     // Nếu là cả năm (không có startDate/endDate) thì hiển thị cả 12 tháng
     const isFullYear = !startDate && !endDate;
-    
+
     let result: Array<{ month: string; amount: number }>;
-    
+
     if (isFullYear) {
       // Hiển thị cả 12 tháng (kể cả tháng = 0)
       result = monthNames.map((month) => ({
@@ -372,39 +385,36 @@ export class PaymentsService {
     };
   }
 
-// test VietQR configuration
-async testVietQRConfig() {
-  try {
-    const testPayment = await this.vietqr.createPayment({
-      amount: 100000,
-      orderId: 'TEST_123',
-      addInfo: 'BOOKING_TEST_123',
-    });
+  // test VietQR configuration
+  async testVietQRConfig() {
+    try {
+      const testPayment = await this.vietqr.createPayment({
+        amount: 100000,
+        orderId: 'TEST_123',
+        addInfo: 'BOOKING_TEST_123',
+      });
 
-    return {
-      success: true,
-      message: 'VietQR configuration is working',
-      config: {
-        accountNo: process.env.VIETQR_ACCOUNT_NO,
-        acqId: process.env.VIETQR_ACQ_ID,
-        accountName: process.env.VIETQR_ACCOUNT_NAME,
-      },
-      testPayment,
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: 'VietQR configuration error',
-      error: error.message,
-      config: {
-        accountNo: process.env.VIETQR_ACCOUNT_NO,
-        acqId: process.env.VIETQR_ACQ_ID,
-        accountName: process.env.VIETQR_ACCOUNT_NAME,
-      },
-    };
+      return {
+        success: true,
+        message: 'VietQR configuration is working',
+        config: {
+          accountNo: process.env.VIETQR_ACCOUNT_NO,
+          acqId: process.env.VIETQR_ACQ_ID,
+          accountName: process.env.VIETQR_ACCOUNT_NAME,
+        },
+        testPayment,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'VietQR configuration error',
+        error: error.message,
+        config: {
+          accountNo: process.env.VIETQR_ACCOUNT_NO,
+          acqId: process.env.VIETQR_ACQ_ID,
+          accountName: process.env.VIETQR_ACCOUNT_NAME,
+        },
+      };
+    }
   }
-}
-
-
-
 }

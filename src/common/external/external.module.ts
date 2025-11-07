@@ -8,4 +8,3 @@ import { RedisModule } from '../../messaging/redis/redis.module';
   exports: [ExternalService],
 })
 export class ExternalModule {}
-

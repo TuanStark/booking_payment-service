@@ -13,8 +13,12 @@ import { RabbitMQProducerService } from './rabbitmq.producer.service';
         useFactory: (configService: ConfigService) => ({
           transport: Transport.RMQ,
           options: {
-            urls: [configService.get<string>('RABBITMQ_URL') || 'amqp://localhost:5672'],
-            queue: configService.get<string>('RABBITMQ_QUEUE') || 'booking.payments',
+            urls: [
+              configService.get<string>('RABBITMQ_URL') ||
+                'amqp://localhost:5672',
+            ],
+            queue:
+              configService.get<string>('RABBITMQ_QUEUE') || 'booking.payments',
             queueOptions: { durable: true },
             noAck: true,
             prefetchCount: 0,

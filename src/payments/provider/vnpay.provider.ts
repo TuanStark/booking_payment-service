@@ -47,13 +47,18 @@ export interface VNPayPaymentResponse {
 export class PaymentVNPayProvider {
   // VNPay Configuration
   private readonly vnpTmnCode = process.env.VNPAY_TMN_CODE || '2QXUI4B4';
-  private readonly vnpHashSecret = process.env.VNPAY_HASH_SECRET || 'RAOEVONQL3DQIQMP7UYXNPGXCVOQFUYD';
-  private readonly vnpUrl = process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
+  private readonly vnpHashSecret =
+    process.env.VNPAY_HASH_SECRET || 'RAOEVONQL3DQIQMP7UYXNPGXCVOQFUYD';
+  private readonly vnpUrl =
+    process.env.VNPAY_URL ||
+    'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
   private readonly vnpVersion = '2.1.0';
   private readonly vnpCommand = 'pay';
   private readonly vnpCurrCode = 'VND';
-  
-  async createVNPayPayment(paymentData: VNPayPaymentRequest): Promise<VNPayPaymentResponse> {
+
+  async createVNPayPayment(
+    paymentData: VNPayPaymentRequest,
+  ): Promise<VNPayPaymentResponse> {
     try {
       const createDate = moment().format('YYYYMMDDHHmmss');
       const expireDate = moment().add(15, 'minutes').format('YYYYMMDDHHmmss');
@@ -78,8 +83,13 @@ export class PaymentVNPayProvider {
 
       const signData = Object.keys(sortedParams)
         .sort()
-        .filter(key => sortedParams[key] !== '' && sortedParams[key] !== null && sortedParams[key] !== undefined)
-        .map(key => `${key}=${encodeURIComponent(sortedParams[key])}`)
+        .filter(
+          (key) =>
+            sortedParams[key] !== '' &&
+            sortedParams[key] !== null &&
+            sortedParams[key] !== undefined,
+        )
+        .map((key) => `${key}=${encodeURIComponent(sortedParams[key])}`)
         .join('&');
 
       console.log('VNPay Sign Data:', signData);
@@ -93,8 +103,8 @@ export class PaymentVNPayProvider {
 
       console.log('VNPay Signature:', signed);
 
-
-      const vnpUrl = this.vnpUrl + '?' + qs.stringify(sortedParams, { encode: false });
+      const vnpUrl =
+        this.vnpUrl + '?' + qs.stringify(sortedParams, { encode: false });
 
       console.log('VNPay Request URL:', vnpUrl);
 
@@ -121,8 +131,13 @@ export class PaymentVNPayProvider {
 
       const signData = Object.keys(sortedParams)
         .sort()
-        .filter(key => sortedParams[key] !== '' && sortedParams[key] !== null && sortedParams[key] !== undefined)
-        .map(key => `${key}=${encodeURIComponent(sortedParams[key])}`)
+        .filter(
+          (key) =>
+            sortedParams[key] !== '' &&
+            sortedParams[key] !== null &&
+            sortedParams[key] !== undefined,
+        )
+        .map((key) => `${key}=${encodeURIComponent(sortedParams[key])}`)
         .join('&');
 
       console.log('VNPay Verify Sign Data:', signData);
@@ -149,11 +164,9 @@ export class PaymentVNPayProvider {
   private sortObject(obj: any): any {
     const sorted: any = {};
     const keys = Object.keys(obj).sort();
-    keys.forEach(key => {
+    keys.forEach((key) => {
       sorted[key] = obj[key];
     });
     return sorted;
   }
-
-  
 }

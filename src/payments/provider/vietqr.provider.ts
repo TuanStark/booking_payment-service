@@ -8,12 +8,16 @@ export class VietqrProvider {
   private acqId = process.env.VIETQR_ACQ_ID || '970418';
   private accountName = process.env.VIETQR_ACCOUNT_NAME || 'Dormitory Booking';
 
-  async createPayment(opts: { amount: number; orderId: string; addInfo?: string }) {
+  async createPayment(opts: {
+    amount: number;
+    orderId: string;
+    addInfo?: string;
+  }) {
     const url = `https://img.vietqr.io/image/${this.acqId}-${this.accountNo}-compact2.jpg`;
-    
+
     const shortOrderId = opts.orderId.substring(0, 8);
     const addInfo = opts.addInfo ?? `BOOKING_${shortOrderId}`;
-    
+
     const params = new URLSearchParams({
       accountName: this.accountName,
       amount: opts.amount.toString(),
@@ -21,14 +25,16 @@ export class VietqrProvider {
       format: 'jpg',
     });
     const qrImageUrl = `${url}?${params.toString()}`;
-    
+
     const paymentUrl = `vietqr://transfer?accountNo=${this.accountNo}&acqId=${this.acqId}&amount=${opts.amount}&addInfo=${encodeURIComponent(addInfo)}`;
-    
-    this.logger.log(`VietQR generated for order ${opts.orderId} (ref: ${shortOrderId})`);
-    return { 
-      qrImageUrl, 
+
+    this.logger.log(
+      `VietQR generated for order ${opts.orderId} (ref: ${shortOrderId})`,
+    );
+    return {
+      qrImageUrl,
       paymentUrl,
-      reference: addInfo
+      reference: addInfo,
     };
   }
 

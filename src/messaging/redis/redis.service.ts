@@ -30,7 +30,9 @@ export class RedisService {
     try {
       await this.cacheManager.del(key);
     } catch (error) {
-      this.logger.error(`Failed to delete cache for key ${key}: ${error.message}`);
+      this.logger.error(
+        `Failed to delete cache for key ${key}: ${error.message}`,
+      );
     }
   }
 }

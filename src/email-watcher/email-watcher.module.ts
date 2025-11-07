@@ -7,11 +7,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { RabbitMQModule } from 'src/messaging/rabbitmq/rabbitmq.module';
 
 @Module({
-  imports: [
-    ScheduleModule.forRoot(),
-    PaymentsModule,
-    RabbitMQModule,
-  ],
+  imports: [ScheduleModule.forRoot(), PaymentsModule, RabbitMQModule],
   providers: [EmailWatcherService, EmailWatcherCron],
 })
 export class EmailWatcherModule {}

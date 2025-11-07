@@ -10,10 +10,13 @@ import { BadRequestException } from '@nestjs/common';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) { }
+  constructor(private readonly paymentsService: PaymentsService) {}
 
   @Post()
-  async create(@Body() createPaymentDto: CreatePaymentDto, @Req() req: Request) {
+  async create(
+    @Body() createPaymentDto: CreatePaymentDto,
+    @Req() req: Request,
+  ) {
     // Extract userId from x-user-id header sent by API Gateway
     const userId = req.headers['x-user-id'] as string;
     console.log('Create payment request received:', createPaymentDto);
@@ -43,7 +46,11 @@ export class PaymentsController {
         : authHeader;
 
       const payments = await this.paymentsService.findAll(query, token);
-      return new ResponseData(payments, HttpStatus.SUCCESS, HttpMessage.SUCCESS);
+      return new ResponseData(
+        payments,
+        HttpStatus.SUCCESS,
+        HttpMessage.SUCCESS,
+      );
     } catch (error) {
       throw new BadRequestException(error.message);
     }
@@ -51,8 +58,15 @@ export class PaymentsController {
 
   // manual verify endpoint (for testing)
   @Post(':id/verify')
-  async manualVerify(@Param('id') id: string, @Body() verifyPaymentDto: VerifyPaymentDto) {
-    return this.paymentsService.updateStatusByPaymentId(id, PaymentStatus.SUCCESS, verifyPaymentDto.transactionId);
+  async manualVerify(
+    @Param('id') id: string,
+    @Body() verifyPaymentDto: VerifyPaymentDto,
+  ) {
+    return this.paymentsService.updateStatusByPaymentId(
+      id,
+      PaymentStatus.SUCCESS,
+      verifyPaymentDto.transactionId,
+    );
   }
 
   // test VietQR configuration

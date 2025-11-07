@@ -7,18 +7,17 @@ import { PrismaService } from './prisma/prisma.service';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EmailWatcherModule } from './email-watcher/email-watcher.module';
 
-
 @Module({
   imports: [
     ConfigModule.forRoot({
-    isGlobal: true,
-  }),
-  ScheduleModule.forRoot(),
-  PrismaModule,
-  PaymentsModule,
-  RabbitMQModule,
-  EmailWatcherModule,
-],
+      isGlobal: true,
+    }),
+    ScheduleModule.forRoot(),
+    PrismaModule,
+    PaymentsModule,
+    RabbitMQModule,
+    EmailWatcherModule,
+  ],
   controllers: [],
   providers: [PrismaService],
 })

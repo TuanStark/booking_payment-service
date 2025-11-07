@@ -26,7 +26,7 @@ export class EmailWatcherService {
   /** Kiểm tra mail mới */
   async checkNewTransactions(): Promise<void> {
     const client = this.createImapClient();
-    
+
     try {
       await client.connect();
       this.logger.log('✅ Connected to IMAP server');
@@ -45,17 +45,23 @@ export class EmailWatcherService {
         // Kiểm tra có mã booking không (hỗ trợ cả UUID đầy đủ và short reference)
         const fullMatch = body.match(/BOOKING_([a-f0-9-]{36})/i); // Full UUID
         const shortMatch = body.match(/BOOKING_([a-f0-9]{8})/i); // Short reference
-        
+
         if (fullMatch || shortMatch) {
           const reference = fullMatch ? fullMatch[1] : shortMatch[1];
           const amountMatch = body.match(/(\d[\d.,]*)\s?VND/);
-          const amount = amountMatch ? parseInt(amountMatch[1].replace(/[.,]/g, '')) : null;
+          const amount = amountMatch
+            ? parseInt(amountMatch[1].replace(/[.,]/g, ''))
+            : null;
 
-          this.logger.log(`📩 Found payment email for BOOKING_${reference}, amount=${amount}`);
+          this.logger.log(
+            `📩 Found payment email for BOOKING_${reference}, amount=${amount}`,
+          );
 
           if (amount !== null) {
             // Tìm payment bằng reference
-            const payment = await this.paymentsService.findPaymentByReference(`BOOKING_${reference}`);
+            const payment = await this.paymentsService.findPaymentByReference(
+              `BOOKING_${reference}`,
+            );
             if (payment) {
               await this.paymentsService.verifyPaymentFromEmail({
                 bookingId: payment.bookingId,
@@ -63,7 +69,9 @@ export class EmailWatcherService {
                 rawMessage: body,
               });
             } else {
-              this.logger.warn(`No payment found for reference BOOKING_${reference}`);
+              this.logger.warn(
+                `No payment found for reference BOOKING_${reference}`,
+              );
             }
           }
         }

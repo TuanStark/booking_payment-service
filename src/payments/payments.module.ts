@@ -10,7 +10,7 @@ import { ExternalModule } from '../common/external/external.module';
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(), 
+    ScheduleModule.forRoot(),
     forwardRef(() => RabbitMQModule),
     ExternalModule,
   ],
