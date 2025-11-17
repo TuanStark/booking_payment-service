@@ -5,35 +5,23 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: payment-service-dev
+      target: production
+    container_name: payment-service-prod
     ports:
       - "3006:3006"
-    environment:
-      PORT: 3006
-      DATABASE_URL: ${DATABASE_URL}
-      REDIS_HOST: redis-payment
-      REDIS_PORT: ${REDIS_PORT}
-      REDIS_TTL: ${REDIS_TTL}
-      KAFKA_BROKER: ${KAFKA_BROKER}
-      KAFKA_CLIENT_ID: ${KAFKA_CLIENT_ID}
-      KAFKA_GROUP_ID: ${KAFKA_GROUP_ID}
-      RABBITMQ_URL: ${RABBITMQ_URL}
-      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE}
-      VIETQR_ACCOUNT_NO: ${VIETQR_ACCOUNT_NO}
-      VIETQR_ACQ_ID: ${VIETQR_ACQ_ID}
-      VIETQR_ACCOUNT_NAME: ${VIETQR_ACCOUNT_NAME}
-      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE}
-      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET}
-      VNPAY_URL: ${VNPAY_URL}
-      IMAP_HOST: ${IMAP_HOST}
-      IMAP_PORT: ${IMAP_PORT}
-      IMAP_USER: ${IMAP_USER}
-      IMAP_PASS: ${IMAP_PASS}
-      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+    env_file:
+    - .env
     volumes:
-      - .:/app
       - /app/node_modules
-    command: sh -c "npx prisma generate && npm run start:dev"
+    user: node
+    command: ["node", "dist/main"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
       my_custom_network:
         ipv4_address: ${APP_IP}
@@ -41,4 +29,3 @@ services:
 networks:
   my_custom_network:
     external: true
-
