@@ -1,10 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import * as crypto from 'crypto-js';
 import * as crypto_node from 'crypto';
-import axios from 'axios';
 import moment from 'moment';
 import * as qs from 'qs';
-import { IPaymentProvider } from './payment-provider.interface';
 
 export interface MoMoPaymentRequest {
   orderId: string;
