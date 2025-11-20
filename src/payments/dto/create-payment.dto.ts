@@ -27,10 +27,6 @@ export class CreatePaymentDto {
 
   @IsString()
   @Type(() => String)
-  userId: string;
-
-  @IsString()
-  @Type(() => String)
   @IsOptional()
   transactionId?: string;
 

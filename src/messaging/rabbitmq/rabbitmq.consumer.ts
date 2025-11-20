@@ -2,6 +2,7 @@ import { Controller, Logger } from '@nestjs/common';
 import { Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
 import { CreatePaymentDto } from 'src/payments/dto/create-payment.dto';
 import { PaymentsService } from 'src/payments/payments.service';
+type BookingCreatedEventPayload = CreatePaymentDto & { userId: string };
 
 @Controller()
 export class RabbitMQConsumerController {
@@ -11,7 +12,7 @@ export class RabbitMQConsumerController {
 
   @EventPattern('booking.created')
   async handleBookingCreated(
-    @Payload() data: CreatePaymentDto,
+    @Payload() data: BookingCreatedEventPayload,
     @Ctx() context: RmqContext,
   ) {
     try {

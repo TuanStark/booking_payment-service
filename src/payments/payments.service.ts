@@ -1,6 +1,8 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PaymentStatus, PaymentMethod } from '@prisma/client';
 import { VietqrProvider } from './provider/vietqr.provider';
+import { PaymentVNPayProvider } from './provider/vnpay.provider';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RabbitMQProducerService } from 'src/messaging/rabbitmq/rabbitmq.producer.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -14,13 +16,21 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly vietqr: VietqrProvider,
+    private readonly vnpay: PaymentVNPayProvider,
     private readonly rabbitmq: RabbitMQProducerService,
     private readonly externalService: ExternalService,
+    private readonly configService: ConfigService,
   ) {}
 
-  private providerFor(method: PaymentMethod | string) {
-    if (String(method).toUpperCase() === 'VIETQR') return this.vietqr;
-    throw new BadRequestException('Unsupported provider');
+  private normalizeMethod(method: PaymentMethod | string): PaymentMethod {
+    const normalized = String(method).toUpperCase();
+    if (
+      normalized !== PaymentMethod.VIETQR &&
+      normalized !== PaymentMethod.VNPAY
+    ) {
+      throw new BadRequestException('Unsupported provider');
+    }
+    return normalized as PaymentMethod;
   }
 
   // create payment and return record + qr url
@@ -31,22 +41,50 @@ export class PaymentsService {
       );
     }
 
-    const provider = this.providerFor(dto.method);
-    const { qrImageUrl, paymentUrl, reference } = await provider.createPayment({
-      amount: dto.amount,
-      orderId: dto.bookingId,
-      addInfo: `BOOKING_${dto.bookingId}`,
-    });
+    const method = this.normalizeMethod(dto.method);
+    let qrImageUrl: string | undefined;
+    let paymentUrl: string | undefined;
+    let reference: string | undefined;
+
+    if (method === PaymentMethod.VIETQR) {
+      const vietqrResult = await this.vietqr.createPayment({
+        amount: dto.amount,
+        orderId: dto.bookingId,
+        addInfo: `BOOKING_${dto.bookingId}`,
+      });
+      qrImageUrl = vietqrResult.qrImageUrl || undefined;
+      paymentUrl = vietqrResult.paymentUrl || undefined;
+      reference = vietqrResult.reference || undefined;
+    } else if (method === PaymentMethod.VNPAY) {
+      const returnUrl =
+        this.configService.get<string>('VNPAY_RETURN_URL') ||
+        'https://booking-payment-service.local/vnpay/return';
+      const ipAddr =
+        (dto as any).ipAddr ||
+        this.configService.get<string>('VNPAY_DEFAULT_IP') ||
+        '127.0.0.1';
+
+      const vnpayResult = await this.vnpay.createVNPayPayment({
+        orderId: dto.bookingId,
+        amount: dto.amount,
+        orderInfo: `BOOKING_${dto.bookingId}`,
+        returnUrl,
+        ipAddr,
+      });
+
+      paymentUrl = vnpayResult.vnpUrl;
+      reference = `VNPAY_${vnpayResult.orderId}`;
+    }
 
     const payment = await this.prisma.payment.create({
       data: {
         userId: userId,
         bookingId: dto.bookingId,
         amount: dto.amount,
-        method: dto.method,
-        qrImageUrl: qrImageUrl || undefined,
-        paymentUrl: paymentUrl || undefined,
-        reference: reference || undefined,
+        method,
+        qrImageUrl,
+        paymentUrl,
+        reference,
         status: PaymentStatus.PENDING,
       },
     });

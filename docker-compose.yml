@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: payment-service-prod
+    container_name: payment-service
     ports:
       - "3006:3006"
     env_file:
