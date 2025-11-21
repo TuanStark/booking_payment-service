@@ -1,45 +1,50 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { generateSignature } from '../payos-utils';
+import { PayosRequestPaymentPayload } from '../dto/payos/payos-request-payment.payload';
+import { firstValueFrom } from 'rxjs';
+import { PayosPaymentCreatedResponse } from '../dto/payos/payos-payment-created.response';
+import { CreatePaymentDto } from '../dto/create-payment.dto';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class VietqrProvider {
-  private readonly logger = new Logger(VietqrProvider.name);
-  // account and acqId from env
-  private accountNo = process.env.VIETQR_ACCOUNT_NO || '0123456789';
-  private acqId = process.env.VIETQR_ACQ_ID || '970418';
-  private accountName = process.env.VIETQR_ACCOUNT_NAME || 'Dormitory Booking';
+  constructor(
+    private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
+  ) {}
 
-  async createPayment(opts: {
-    amount: number;
-    orderId: string;
-    addInfo?: string;
-  }) {
-    const url = `https://img.vietqr.io/image/${this.acqId}-${this.accountNo}-compact2.jpg`;
-
-    const shortOrderId = opts.orderId.substring(0, 8);
-    const addInfo = opts.addInfo ?? `BOOKING_${shortOrderId}`;
-
-    const params = new URLSearchParams({
-      accountName: this.accountName,
-      amount: opts.amount.toString(),
-      addInfo,
-      format: 'jpg',
-    });
-    const qrImageUrl = `${url}?${params.toString()}`;
-
-    const paymentUrl = `vietqr://transfer?accountNo=${this.accountNo}&acqId=${this.acqId}&amount=${opts.amount}&addInfo=${encodeURIComponent(addInfo)}`;
-
-    this.logger.log(
-      `VietQR generated for order ${opts.orderId} (ref: ${shortOrderId})`,
-    );
-    return {
-      qrImageUrl,
-      paymentUrl,
-      reference: addInfo,
+  async createPayment(body: CreatePaymentDto): Promise<any> {
+    const url = `https://api-merchant.payos.vn/v2/payment-requests`;
+    const config = {
+      headers: {
+        'x-client-id': this.configService.getOrThrow<string>('PAYOS_CLIENT_ID'),
+        'x-api-key': this.configService.getOrThrow<string>('PAYOS_API_KEY'),
+      },
     };
+    const dataForSignature = {
+      orderCode: Number(body.bookingId),
+      amount: body.amount ?? 0,
+      description: `Thanh toan booking ${body.bookingId}`,
+      cancelUrl: 'https://example.com/cancel',
+      returnUrl: 'https://example.com/return',
+    };
+    const signature = generateSignature(
+      dataForSignature,
+      this.configService.getOrThrow<string>('PAYOS_CHECKSUM_KEY'),
+    );
+    const payload: PayosRequestPaymentPayload = {
+      ...dataForSignature,
+      signature,
+    };
+    const response = await firstValueFrom(
+      this.httpService.post(url, payload, config),
+    );
+    return response.data as unknown as PayosPaymentCreatedResponse;
   }
 
-  // With public VietQR there is no webhook; verification handled externally (IMAP / bank API)
-  async verifyPayment(_: any) {
-    return false;
+  handleWebhook() {
+    // TODO: Parse provider event and update payment
+    return { received: true };
   }
 }

@@ -15,15 +15,15 @@ export class PaymentsController {
     private readonly vnpayProvider: PaymentVNPayProvider,
   ) {}
 
-  @Post('vnpay/create')
-  async createVNPayPayment(@Body() createVNPayPaymentDto: CreateVNPayPaymentDto) {
-    try {
-      const paymentResponse = await this.vnpayProvider.createVNPayPayment(createVNPayPaymentDto);
-      return new ResponseData(paymentResponse, HttpStatus.CREATED, HttpMessage.CREATED);
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
-  }
+  // @Post('vnpay/create')
+  // async createVNPayPayment(@Body() createVNPayPaymentDto: CreateVNPayPaymentDto) {
+  //   try {
+  //     const paymentResponse = await this.vnpayProvider.createVNPayPayment(createVNPayPaymentDto);
+  //     return new ResponseData(paymentResponse, HttpStatus.CREATED, HttpMessage.CREATED);
+  //   } catch (error) {
+  //     throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
+  //   }
+  // }
 
   @Post('vnpay/verify')
   async verifyVNPaySignature(@Body() vnpParams: any) {

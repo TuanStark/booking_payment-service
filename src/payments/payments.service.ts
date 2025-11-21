@@ -8,6 +8,7 @@ import { RabbitMQProducerService } from 'src/messaging/rabbitmq/rabbitmq.produce
 import { PrismaService } from 'src/prisma/prisma.service';
 import { FindAllDto } from 'src/common/global/find-all.dto';
 import { ExternalService } from 'src/common/external/external.service';
+import { generateBookingCode } from 'src/utils/generate-code';
 
 @Injectable()
 export class PaymentsService {
@@ -20,7 +21,7 @@ export class PaymentsService {
     private readonly rabbitmq: RabbitMQProducerService,
     private readonly externalService: ExternalService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   private normalizeMethod(method: PaymentMethod | string): PaymentMethod {
     const normalized = String(method).toUpperCase();
@@ -34,62 +35,86 @@ export class PaymentsService {
   }
 
   // create payment and return record + qr url
+  // payments.service.ts → thay nguyên hàm createPayment bằng cái này
+
   async createPayment(userId: string, dto: CreatePaymentDto) {
+    // Validate required fields
     if (!dto.bookingId || !dto.amount || !dto.method) {
       throw new BadRequestException(
         'Missing required fields: bookingId, amount, method',
       );
     }
 
+    // Chuẩn hóa method
     const method = this.normalizeMethod(dto.method);
+
     let qrImageUrl: string | undefined;
     let paymentUrl: string | undefined;
     let reference: string | undefined;
 
+    // Tạo mã giao dịch duy nhất cho VNPay (bắt buộc phải unique toàn hệ thống)
+    const generateVnpayTxnRef = () => {
+      const timestamp = Date.now();
+      const random = Math.floor(Math.random() * 10000)
+        .toString()
+        .padStart(4, '0');
+      return `BK${dto.bookingId}_${timestamp}_${random}`.substring(0, 100); // max 100 ký tự
+    };
+
     if (method === PaymentMethod.VIETQR) {
+      // === VIETQR (giữ nguyên như cũ) ===
+      const transactionId = generateBookingCode({});
       const vietqrResult = await this.vietqr.createPayment({
         amount: dto.amount,
         orderId: dto.bookingId,
         addInfo: `BOOKING_${dto.bookingId}`,
+        transactionId: transactionId ?? '',
       });
       qrImageUrl = vietqrResult.qrImageUrl || undefined;
       paymentUrl = vietqrResult.paymentUrl || undefined;
       reference = vietqrResult.reference || undefined;
+
     } else if (method === PaymentMethod.VNPAY) {
-      const returnUrl =
-        this.configService.get<string>('VNPAY_RETURN_URL') ||
-        'https://booking-payment-service.local/vnpay/return';
-      const ipAddr =
-        (dto as any).ipAddr ||
-        this.configService.get<string>('VNPAY_DEFAULT_IP') ||
-        '127.0.0.1';
+      // === VNPAY – ĐÃ FIX HOÀN HẢO ===
+      const returnUrl = this.configService.get<string>('VNPAY_RETURN_URL');
+      if (!returnUrl) {
+        throw new BadRequestException('VNPAY_RETURN_URL chưa được cấu hình trong .env');
+      }
+
+      const ipAddr = (dto as any).ipAddr || '127.0.0.1';
+
+      // Tạo mã giao dịch VNPay DUY NHẤT (rất quan trọng!)
+      const vnpTxnRef = generateVnpayTxnRef();
 
       const vnpayResult = await this.vnpay.createVNPayPayment({
-        orderId: dto.bookingId,
+        orderId: vnpTxnRef,                    // ← Không dùng bookingId trực tiếp
         amount: dto.amount,
-        orderInfo: `BOOKING_${dto.bookingId}`,
-        returnUrl,
+        orderInfo: `Thanh toan booking ${dto.bookingId}`,
+        returnUrl,                             // ← Lấy từ .env, đảm bảo đúng
         ipAddr,
+        locale: 'vn',
       });
 
       paymentUrl = vnpayResult.vnpUrl;
-      reference = `VNPAY_${vnpayResult.orderId}`;
+      reference = vnpTxnRef; // ← Lưu lại để IPN và return URL tìm đúng payment
     }
 
+    // Tạo bản ghi payment trong DB
     const payment = await this.prisma.payment.create({
       data: {
-        userId: userId,
+        userId,
         bookingId: dto.bookingId,
         amount: dto.amount,
         method,
         qrImageUrl,
         paymentUrl,
-        reference,
+        reference,           // ← Với VNPay là vnp_TxnRef, với VietQR là reference
         status: PaymentStatus.PENDING,
       },
     });
 
-    this.logger.log(`Payment created ${payment.id}`);
+    this.logger.log(`Payment created: ${payment.id} | Method: ${method} | Ref: ${reference}`);
+
     return payment;
   }
 
@@ -186,13 +211,13 @@ export class PaymentsService {
     const searchUpCase = search.charAt(0).toUpperCase() + search.slice(1);
     const where = search
       ? {
-          OR: [
-            { userId: { contains: searchUpCase } },
-            { bookingId: { contains: searchUpCase } },
-            { reference: { contains: searchUpCase } },
-            { transactionId: { contains: searchUpCase } },
-          ],
-        }
+        OR: [
+          { userId: { contains: searchUpCase } },
+          { bookingId: { contains: searchUpCase } },
+          { reference: { contains: searchUpCase } },
+          { transactionId: { contains: searchUpCase } },
+        ],
+      }
       : {};
     const orderBy = { [sortBy]: sortOrder };
 
