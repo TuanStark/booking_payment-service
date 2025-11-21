@@ -66,13 +66,11 @@ export class PaymentsService {
       const transactionId = generateBookingCode({});
       const vietqrResult = await this.vietqr.createPayment({
         amount: dto.amount,
-        orderId: dto.bookingId,
-        addInfo: `BOOKING_${dto.bookingId}`,
-        transactionId: transactionId ?? '',
+        bookingId: dto.bookingId,
       });
-      qrImageUrl = vietqrResult.qrImageUrl || undefined;
-      paymentUrl = vietqrResult.paymentUrl || undefined;
-      reference = vietqrResult.reference || undefined;
+      qrImageUrl = vietqrResult.data.qrCode || undefined;
+      paymentUrl = vietqrResult.data.checkoutUrl || undefined;
+      reference = vietqrResult.data.orderCode.toString() || undefined;
 
     } else if (method === PaymentMethod.VNPAY) {
       // === VNPAY – ĐÃ FIX HOÀN HẢO ===
@@ -446,38 +444,5 @@ export class PaymentsService {
         totalPayments: payments.length,
       },
     };
-  }
-
-  // test VietQR configuration
-  async testVietQRConfig() {
-    try {
-      const testPayment = await this.vietqr.createPayment({
-        amount: 100000,
-        orderId: 'TEST_123',
-        addInfo: 'BOOKING_TEST_123',
-      });
-
-      return {
-        success: true,
-        message: 'VietQR configuration is working',
-        config: {
-          accountNo: process.env.VIETQR_ACCOUNT_NO,
-          acqId: process.env.VIETQR_ACQ_ID,
-          accountName: process.env.VIETQR_ACCOUNT_NAME,
-        },
-        testPayment,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: 'VietQR configuration error',
-        error: error.message,
-        config: {
-          accountNo: process.env.VIETQR_ACCOUNT_NO,
-          acqId: process.env.VIETQR_ACQ_ID,
-          accountName: process.env.VIETQR_ACCOUNT_NAME,
-        },
-      };
-    }
   }
 }

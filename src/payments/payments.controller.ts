@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get, Param, Req, Query, HttpException } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Req, Query, HttpException, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { PaymentStatus } from '@prisma/client';
@@ -8,11 +8,13 @@ import { HttpMessage, HttpStatus } from 'src/common/global/globalEnum';
 import { ResponseData } from 'src/common/global/globalClass';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentVNPayProvider } from './provider/vnpay.provider';
+import { VietqrProvider } from './provider/vietqr.provider';
 
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService,
     private readonly vnpayProvider: PaymentVNPayProvider,
+    private readonly vietqrProvider: VietqrProvider,
   ) {}
 
   // @Post('vnpay/create')
@@ -126,10 +128,14 @@ export class PaymentsController {
     );
   }
 
-  // test VietQR configuration
-  @Get('test/vietqr')
-  async testVietQR() {
-    return this.paymentsService.testVietQRConfig();
+  @Post()
+  async createPayment(@Body() body: CreatePaymentDto): Promise<any> {
+    return this.vietqrProvider.createPayment(body);
+  }
+
+  @Post('webhook')
+  handleWebhook() {
+    return this.vietqrProvider.handleWebhook();
   }
 
   /**
