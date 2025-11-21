@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { VietqrProvider } from './provider/vietqr.provider';
@@ -9,9 +10,14 @@ import { ExternalModule } from '../common/external/external.module';
 import { PaymentVNPayProvider } from './provider/vnpay.provider';
 
 @Module({
-  imports: [forwardRef(() => RabbitMQModule), ExternalModule],
+  imports: [forwardRef(() => RabbitMQModule), ExternalModule, HttpModule],
   controllers: [PaymentsController, RabbitMQConsumerController],
-  providers: [PaymentsService, VietqrProvider, PaymentVNPayProvider, EmailWatcherService],
+  providers: [
+    PaymentsService,
+    VietqrProvider,
+    PaymentVNPayProvider,
+    EmailWatcherService,
+  ],
   exports: [PaymentsService],
 })
 export class PaymentsModule {}

@@ -21,7 +21,7 @@ export class PaymentsService {
     private readonly rabbitmq: RabbitMQProducerService,
     private readonly externalService: ExternalService,
     private readonly configService: ConfigService,
-  ) { }
+  ) {}
 
   private normalizeMethod(method: PaymentMethod | string): PaymentMethod {
     const normalized = String(method).toUpperCase();
@@ -61,6 +61,10 @@ export class PaymentsService {
       return `BK${dto.bookingId}_${timestamp}_${random}`.substring(0, 100); // max 100 ký tự
     };
 
+    this.logger.log(
+      `[createPayment] user=${userId} booking=${dto.bookingId} method=${method} amount=${dto.amount}`,
+    );
+
     if (method === PaymentMethod.VIETQR) {
       // === VIETQR (giữ nguyên như cũ) ===
       const transactionId = generateBookingCode({});
@@ -71,12 +75,27 @@ export class PaymentsService {
       qrImageUrl = vietqrResult.data.qrCode || undefined;
       paymentUrl = vietqrResult.data.checkoutUrl || undefined;
       reference = vietqrResult.data.orderCode.toString() || undefined;
-
     } else if (method === PaymentMethod.VNPAY) {
-      // === VNPAY – ĐÃ FIX HOÀN HẢO ===
-      const returnUrl = this.configService.get<string>('VNPAY_RETURN_URL');
+      // === VNPAY ===
+      // Lấy return URL từ env hoặc tự động tạo từ base URL
+      let returnUrl = this.configService.get<string>('VNPAY_RETURN_URL');
+      
       if (!returnUrl) {
-        throw new BadRequestException('VNPAY_RETURN_URL chưa được cấu hình trong .env');
+        // Tự động tạo từ PAYMENT_SERVICE_URL hoặc BASE_URL
+        const baseUrl = 
+          this.configService.get<string>('PAYMENT_SERVICE_URL') ||
+          this.configService.get<string>('BASE_URL') ||
+          this.configService.get<string>('API_URL');
+        
+        if (baseUrl) {
+          returnUrl = `${baseUrl.replace(/\/$/, '')}/payments/vnpay/return`;
+        } else {
+          throw new BadRequestException(
+            'VNPAY_RETURN_URL hoặc PAYMENT_SERVICE_URL/BASE_URL chưa được cấu hình trong .env. ' +
+            'Vui lòng cấu hình VNPAY_RETURN_URL với URL đầy đủ (ví dụ: https://yourdomain.com/payments/vnpay/return) ' +
+            'và đăng ký URL này trong VNPay dashboard.',
+          );
+        }
       }
 
       const ipAddr = (dto as any).ipAddr || '127.0.0.1';
@@ -84,11 +103,15 @@ export class PaymentsService {
       // Tạo mã giao dịch VNPay DUY NHẤT (rất quan trọng!)
       const vnpTxnRef = generateVnpayTxnRef();
 
+      this.logger.debug(
+        `[createPayment] VNPay config resolved returnUrl=${returnUrl}`,
+      );
+
       const vnpayResult = await this.vnpay.createVNPayPayment({
-        orderId: vnpTxnRef,                    // ← Không dùng bookingId trực tiếp
+        orderId: vnpTxnRef, // ← Không dùng bookingId trực tiếp
         amount: dto.amount,
         orderInfo: `Thanh toan booking ${dto.bookingId}`,
-        returnUrl,                             // ← Lấy từ .env, đảm bảo đúng
+        returnUrl, // ← Lấy từ .env, đảm bảo đúng
         ipAddr,
         locale: 'vn',
       });
@@ -106,12 +129,14 @@ export class PaymentsService {
         method,
         qrImageUrl,
         paymentUrl,
-        reference,           // ← Với VNPay là vnp_TxnRef, với VietQR là reference
+        reference, // ← Với VNPay là vnp_TxnRef, với VietQR là reference
         status: PaymentStatus.PENDING,
       },
     });
 
-    this.logger.log(`Payment created: ${payment.id} | Method: ${method} | Ref: ${reference}`);
+    this.logger.log(
+      `Payment created: ${payment.id} | Method: ${method} | Ref: ${reference}`,
+    );
 
     return payment;
   }
@@ -209,13 +234,13 @@ export class PaymentsService {
     const searchUpCase = search.charAt(0).toUpperCase() + search.slice(1);
     const where = search
       ? {
-        OR: [
-          { userId: { contains: searchUpCase } },
-          { bookingId: { contains: searchUpCase } },
-          { reference: { contains: searchUpCase } },
-          { transactionId: { contains: searchUpCase } },
-        ],
-      }
+          OR: [
+            { userId: { contains: searchUpCase } },
+            { bookingId: { contains: searchUpCase } },
+            { reference: { contains: searchUpCase } },
+            { transactionId: { contains: searchUpCase } },
+          ],
+        }
       : {};
     const orderBy = { [sortBy]: sortOrder };
 
@@ -444,5 +469,114 @@ export class PaymentsService {
         totalPayments: payments.length,
       },
     };
+  }
+
+  // Trong file payments.service.ts – dán vào cuối class
+
+  async handleVnpayReturn(query: Record<string, any>) {
+    this.logger.debug(
+      `[handleVnpayReturn] Received query: ${JSON.stringify(query)}`,
+    );
+
+    const isValid = this.vnpay.verifyVNPaySignature(query);
+    if (!isValid) {
+      this.logger.warn(
+        `[handleVnpayReturn] Invalid signature for txn=${query.vnp_TxnRef}`,
+      );
+      throw new BadRequestException('Chữ ký không hợp lệ');
+    }
+
+    const txnRef = query.vnp_TxnRef as string;
+    const responseCode = query.vnp_ResponseCode as string;
+
+    const payment = await this.prisma.payment.findFirst({
+      where: { reference: txnRef, method: 'VNPAY' },
+    });
+
+    if (!payment) {
+      this.logger.warn(
+        `[handleVnpayReturn] Payment not found for reference=${txnRef}`,
+      );
+      throw new BadRequestException('Không tìm thấy giao dịch');
+    }
+
+    if (responseCode === '00') {
+      this.logger.log(
+        `[handleVnpayReturn] Payment success txn=${txnRef} booking=${payment.bookingId}`,
+      );
+      await this.updateStatusByPaymentId(
+        payment.id,
+        PaymentStatus.SUCCESS,
+        query.vnp_TransactionNo,
+      );
+      return { success: true, payment };
+    } else {
+      this.logger.warn(
+        `[handleVnpayReturn] Payment failed txn=${txnRef} code=${responseCode}`,
+      );
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
+      return { success: false, code: responseCode };
+    }
+  }
+
+  async handleVnpayIpn(query: Record<string, any>) {
+    this.logger.log(`VNPay IPN received: ${JSON.stringify(query)}`);
+
+    const isValid = this.vnpay.verifyVNPaySignature(query);
+    if (!isValid) {
+      this.logger.warn(
+        `[handleVnpayIpn] Invalid signature for txn=${query.vnp_TxnRef}`,
+      );
+      return { RspCode: '97', Message: 'Fail checksum' };
+    }
+
+    const txnRef = query.vnp_TxnRef as string;
+    const amount = Number(query.vnp_Amount) / 100;
+    const responseCode = query.vnp_ResponseCode as string;
+
+    const payment = await this.prisma.payment.findFirst({
+      where: { reference: txnRef, method: 'VNPAY' },
+    });
+
+    if (!payment) {
+      this.logger.warn(
+        `[handleVnpayIpn] Payment not found for reference=${txnRef}`,
+      );
+      return { RspCode: '02', Message: 'Order not found' };
+    }
+
+    // Kiểm tra số tiền có đúng không
+    if (amount !== payment.amount) {
+      this.logger.warn(
+        `[handleVnpayIpn] Amount mismatch txn=${txnRef} expected=${payment.amount} received=${amount}`,
+      );
+      return { RspCode: '04', Message: 'Invalid amount' };
+    }
+
+    // Tránh xử lý 2 lần
+    if (payment.status === PaymentStatus.SUCCESS) {
+      this.logger.debug(
+        `[handleVnpayIpn] Payment already success txn=${txnRef}`,
+      );
+      return { RspCode: '00', Message: 'Confirm success' };
+    }
+
+    if (responseCode === '00') {
+      this.logger.log(
+        `[handleVnpayIpn] Payment success txn=${txnRef} booking=${payment.bookingId}`,
+      );
+      await this.updateStatusByPaymentId(
+        payment.id,
+        PaymentStatus.SUCCESS,
+        query.vnp_TransactionNo,
+      );
+      return { RspCode: '00', Message: 'Confirm success' };
+    } else {
+      this.logger.warn(
+        `[handleVnpayIpn] Payment failed txn=${txnRef} code=${responseCode}`,
+      );
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
+      return { RspCode: '99', Message: 'Payment failed' };
+    }
   }
 }

@@ -52,7 +52,6 @@ export class VerifyPaymentDto {
   transactionId?: string;
 }
 
-
 export class CreateVNPayPaymentDto {
   @IsString()
   orderId: string;

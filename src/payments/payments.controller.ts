@@ -1,5 +1,6 @@
-import { Controller, Post, Body, Get, Param, Req, Query, HttpException, UseGuards } from '@nestjs/common';
-import type { Request } from 'express';
+import { Controller, Post, Body, Get, Param, Req, Query, HttpException, UseGuards, Res, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
 import { PaymentStatus } from '@prisma/client';
 import { CreatePaymentDto, CreateVNPayPaymentDto, VerifyPaymentDto } from './dto/create-payment.dto';
@@ -12,9 +13,13 @@ import { VietqrProvider } from './provider/vietqr.provider';
 
 @Controller('payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService,
+  private readonly logger = new Logger(PaymentsController.name);
+
+  constructor(
+    private readonly paymentsService: PaymentsService,
     private readonly vnpayProvider: PaymentVNPayProvider,
     private readonly vietqrProvider: VietqrProvider,
+    private readonly configService: ConfigService,
   ) {}
 
   // @Post('vnpay/create')
@@ -37,38 +42,17 @@ export class PaymentsController {
     }
   }
 
-  @Get('vnpay/test')
-  async testVNPaySignature(@Query() query: any) {
-    try {
-      console.log('VNPay Test Query:', query);
-
-      // Test signature verification
-      const isValid = this.vnpayProvider.verifyVNPaySignature(query);
-
-      return new ResponseData({
-        isValid,
-        receivedParams: query,
-        message: isValid ? 'Signature is valid' : 'Signature is invalid'
-      }, HttpStatus.SUCCESS, HttpMessage.SUCCESS);
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
-  }
-
-  @Get('vnpay/config')
-  async getVNPayConfig() {
-    try {
-      // Return VNPay configuration (without sensitive data)
-      return new ResponseData({
-        vnpUrl: process.env.VNPAY_URL,
-        vnpTmnCode: process.env.VNPAY_TMN_CODE,
-        hasHashSecret: !!process.env.VNPAY_HASH_SECRET,
-        hashSecretLength: process.env.VNPAY_HASH_SECRET?.length || 0,
-        environment: process.env.NODE_ENV || 'development'
-      }, HttpStatus.SUCCESS, HttpMessage.SUCCESS);
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
+  /**
+   * Lấy IP address từ request (giống logic code mẫu VNPay)
+   */
+  private getClientIp(req: Request): string {
+    return (
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket.remoteAddress ||
+      req.connection.remoteAddress ||
+      (req.connection as any).socket?.remoteAddress ||
+      '127.0.0.1'
+    );
   }
 
   @Post()
@@ -78,8 +62,11 @@ export class PaymentsController {
   ) {
     // Extract userId from x-user-id header sent by API Gateway
     const userId = req.headers['x-user-id'] as string;
-    console.log('Create payment request received:', createPaymentDto);
-    console.log('UserId from header:', userId);
+    const clientIp = this.getClientIp(req);
+    
+    this.logger.debug(
+      `[create] Payment request: userId=${userId}, method=${createPaymentDto.method}, amount=${createPaymentDto.amount}, ip=${clientIp}`,
+    );
 
     if (!userId) {
       throw new Error('User ID is required');
@@ -87,7 +74,8 @@ export class PaymentsController {
 
     return this.paymentsService.createPayment(userId, {
       ...createPaymentDto,
-    });
+      ipAddr: clientIp,
+    } as any);
   }
 
   @Get(':id')
@@ -128,7 +116,43 @@ export class PaymentsController {
     );
   }
 
-  @Post()
+  @Get('/vnpay/return')
+  async vnpayReturn(@Query() query: Record<string, any>, @Res() res: Response) {
+    try {
+      // Dùng service để xử lý (sẽ viết ở dưới)
+      const result = await this.paymentsService.handleVnpayReturn(query);
+
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+
+      if (result.success) {
+        // Chuyển về frontend của bạn (React/Vue/Next.js...)
+        return res.redirect(
+          `${frontendUrl}/payment/success?bookingId=${result.payment?.bookingId}`,
+        );
+      } else {
+        return res.redirect(
+          `${frontendUrl}/payment/failed?code=${result.code || '99'}`,
+        );
+      }
+    } catch (error) {
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+      return res.redirect(
+        `${frontendUrl}/payment/failed?code=99`,
+      );
+    }
+  }
+
+  // IPN – BẮT BUỘC PHẢI CÓ (VNPay gọi về server)
+  @Post('/vnpay/ipn')
+  async vnpayIpn(@Req() req: Request, @Res() res: Response) {
+    const result = await this.paymentsService.handleVnpayIpn(req.query as any);
+
+    // VNPay yêu cầu trả về JSON đúng format
+    return res.json(result);
+  }
+
+// vietqr
+  @Post('vietqr/create')
   async createPayment(@Body() body: CreatePaymentDto): Promise<any> {
     return this.vietqrProvider.createPayment(body);
   }
