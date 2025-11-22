@@ -1,4 +1,4 @@
-import { PaymentMethod, PaymentStatus } from '@prisma/client';
+import { PaymentMethod, PaymentStatus } from '../dto/enum';
 
 export interface CreatePaymentDto {
   bookingId: string;

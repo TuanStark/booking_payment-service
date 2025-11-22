@@ -1,6 +1,7 @@
 import { Controller, Logger } from '@nestjs/common';
 import { Ctx, EventPattern, Payload, RmqContext } from '@nestjs/microservices';
 import { CreatePaymentDto } from 'src/payments/dto/create-payment.dto';
+import { PaymentStatus } from 'src/payments/dto/enum';
 import { PaymentsService } from 'src/payments/payments.service';
 type BookingCreatedEventPayload = CreatePaymentDto & { userId: string };
 
@@ -54,8 +55,8 @@ export class RabbitMQConsumerController {
       const payment = await this.paymentService.findPaymentByReference(
         data.bookingId,
       );
-      if (payment && payment.status === 'PENDING') {
-        await this.paymentService.updateStatusByPaymentId(payment.id, 'FAILED');
+      if (payment && payment.status === PaymentStatus.PENDING) {
+        await this.paymentService.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
         this.logger.log(
           `Payment ${payment.id} canceled for booking ${data.bookingId}`,
         );

@@ -2,8 +2,8 @@ import { Controller, Post, Body, Get, Param, Req, Query, HttpException, UseGuard
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { PaymentsService } from './payments.service';
-import { PaymentStatus } from '@prisma/client';
-import { CreatePaymentDto, CreateVNPayPaymentDto, VerifyPaymentDto } from './dto/create-payment.dto';
+import { PaymentStatus } from './dto/enum';
+import { CreatePaymentDto, VerifyPaymentDto } from './dto/create-payment.dto';
 import { FindAllDto } from 'src/common/global/find-all.dto';
 import { HttpMessage, HttpStatus } from 'src/common/global/globalEnum';
 import { ResponseData } from 'src/common/global/globalClass';

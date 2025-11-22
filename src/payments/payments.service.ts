@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PaymentStatus, PaymentMethod } from '@prisma/client';
+import { PaymentStatus, PaymentMethod } from './dto/enum';
 import { VietqrProvider } from './provider/vietqr.provider';
 import { PaymentVNPayProvider } from './provider/vnpay.provider';
 import { CreatePaymentDto } from './dto/create-payment.dto';
