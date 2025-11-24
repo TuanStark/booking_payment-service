@@ -52,8 +52,8 @@ export class PaymentVNPayProvider {
     // Tạo object mới với keys đã sort và encode values
     for (const encodedKey of keys) {
       const originalKey = decodeURIComponent(encodedKey);
-      const value = obj[originalKey] === null || obj[originalKey] === undefined 
-        ? '' 
+      const value = obj[originalKey] === null || obj[originalKey] === undefined
+        ? ''
         : obj[originalKey];
       sorted[encodedKey] = encodeURIComponent(value).replace(/%20/g, '+');
     }
@@ -86,17 +86,14 @@ export class PaymentVNPayProvider {
     paymentData: VNPayPaymentRequest,
   ): Promise<VNPayPaymentResponse> {
     try {
-      // Set timezone như code mẫu VNPay
-      process.env.TZ = 'Asia/Ho_Chi_Minh';
-
       this.logger.debug(
         `[createVNPayPayment] Creating payment: orderId=${paymentData.orderId}, amount=${paymentData.amount}, returnUrl=${paymentData.returnUrl}, ip=${paymentData.ipAddr}`,
       );
-      
-      // Thời gian Việt Nam (GMT+7) - dùng moment như code mẫu
-      const date = new Date();
-      const createDate = moment(date).format('YYYYMMDDHHmmss');
-      const expireDate = moment(date).add(15, 'minutes').format('YYYYMMDDHHmmss');
+
+      // Thời gian Việt Nam (GMT+7) - dùng moment.utcOffset(7) để đảm bảo đúng múi giờ
+      const date = moment().utcOffset(7);
+      const createDate = date.format('YYYYMMDDHHmmss');
+      const expireDate = date.add(15, 'minutes').format('YYYYMMDDHHmmss');
 
       // VNPay yêu cầu amount nhân 100 và là string
       const vnpAmount = Math.round(paymentData.amount * 100).toString();
@@ -105,6 +102,16 @@ export class PaymentVNPayProvider {
       const vnpTxnRef = String(paymentData.orderId)
         .replace(/[^a-zA-Z0-9_-]/g, '')
         .substring(0, 100);
+
+      // Xử lý IP Address: VNPay Sandbox đôi khi lỗi với IPv6 (::1)
+      let vnpIpAddr = paymentData.ipAddr || '127.0.0.1';
+      if (vnpIpAddr === '::1') {
+        vnpIpAddr = '127.0.0.1';
+      }
+      // Chỉ lấy IPv4 đầu tiên nếu có list
+      if (vnpIpAddr.includes(',')) {
+        vnpIpAddr = vnpIpAddr.split(',')[0].trim();
+      }
 
       // Params chính thức gửi sang VNPay
       const vnpParams: Record<string, any> = {
@@ -120,7 +127,7 @@ export class PaymentVNPayProvider {
         vnp_OrderType: 'other', // hoặc 250001 cho topping up, xem tài liệu VNPay
         vnp_Locale: paymentData.locale || 'vn',
         vnp_ReturnUrl: paymentData.returnUrl, // bắt buộc https:// trên production
-        vnp_IpAddr: (paymentData.ipAddr || '127.0.0.1').substring(0, 45),
+        vnp_IpAddr: vnpIpAddr.substring(0, 45),
         vnp_CreateDate: createDate,
         vnp_ExpireDate: expireDate,
       };
@@ -130,11 +137,21 @@ export class PaymentVNPayProvider {
         vnpParams.vnp_BankCode = paymentData.bankCode;
       }
 
-      // Tạo chữ ký từ params (hàm createSecureHash sẽ tự sort)
-      const secureHash = this.createSecureHash(vnpParams);
-      
       // Sort params để tạo query string (giống code mẫu)
       const sortedParams = this.sortObject(vnpParams);
+
+      // Tạo query string từ sorted object (không encode thêm vì đã encode rồi)
+      const signData = Object.keys(sortedParams)
+        .map((key) => `${key}=${sortedParams[key]}`)
+        .join('&');
+
+      // Log chuỗi cần ký để debug (QUAN TRỌNG: kiểm tra log này nếu lỗi Checksum)
+      this.logger.debug(`[createVNPayPayment] Sign Data: ${signData}`);
+
+      // Tạo hash SHA512
+      const hmac = crypto.createHmac('sha512', this.vnpHashSecret);
+      const secureHash = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex').toUpperCase();
+
       sortedParams['vnp_SecureHash'] = secureHash;
 
       // Tạo query string từ sorted params (đã encode sẵn)

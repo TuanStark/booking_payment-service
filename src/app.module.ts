@@ -5,7 +5,6 @@ import { PaymentsModule } from './payments/payments.module';
 import { RabbitMQModule } from './messaging/rabbitmq/rabbitmq.module';
 import { PrismaService } from './prisma/prisma.service';
 import { ScheduleModule } from '@nestjs/schedule';
-import { EmailWatcherModule } from './email-watcher/email-watcher.module';
 
 @Module({
   imports: [
@@ -16,9 +15,8 @@ import { EmailWatcherModule } from './email-watcher/email-watcher.module';
     PrismaModule,
     PaymentsModule,
     RabbitMQModule,
-    EmailWatcherModule,
   ],
   controllers: [],
   providers: [PrismaService],
 })
-export class AppModule {}
+export class AppModule { }

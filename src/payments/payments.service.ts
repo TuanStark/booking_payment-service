@@ -21,7 +21,7 @@ export class PaymentsService {
     private readonly rabbitmq: RabbitMQProducerService,
     private readonly externalService: ExternalService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   private normalizeMethod(method: PaymentMethod | string): PaymentMethod {
     const normalized = String(method).toUpperCase();
@@ -36,7 +36,6 @@ export class PaymentsService {
 
   // create payment and return record + qr url
   // payments.service.ts → thay nguyên hàm createPayment bằng cái này
-
   async createPayment(userId: string, dto: CreatePaymentDto) {
     // Validate required fields
     if (!dto.bookingId || !dto.amount || !dto.method) {
@@ -79,14 +78,14 @@ export class PaymentsService {
       // === VNPAY ===
       // Lấy return URL từ env hoặc tự động tạo từ base URL
       let returnUrl = this.configService.get<string>('VNPAY_RETURN_URL');
-      
+
       if (!returnUrl) {
         // Tự động tạo từ PAYMENT_SERVICE_URL hoặc BASE_URL
-        const baseUrl = 
+        const baseUrl =
           this.configService.get<string>('PAYMENT_SERVICE_URL') ||
           this.configService.get<string>('BASE_URL') ||
           this.configService.get<string>('API_URL');
-        
+
         if (baseUrl) {
           returnUrl = `${baseUrl.replace(/\/$/, '')}/payments/vnpay/return`;
         } else {
@@ -171,43 +170,6 @@ export class PaymentsService {
     return payment;
   }
 
-  async verifyPaymentFromEmail(data: {
-    bookingId: string;
-    amount: number;
-    rawMessage: string;
-  }) {
-    const { bookingId, amount } = data;
-
-    const payment = await this.prisma.payment.findFirst({
-      where: { bookingId, status: 'PENDING' },
-    });
-
-    if (!payment) {
-      this.logger.warn(`No pending payment found for booking ${bookingId}`);
-      return;
-    }
-
-    await this.prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: 'SUCCESS',
-        paymentDate: new Date(),
-      },
-    });
-
-    await this.rabbitmq.emitPaymentEvent('payment.status.updated', {
-      paymentId: payment.id,
-      bookingId: payment.bookingId,
-      amount,
-      status: 'SUCCESS',
-      reference: payment.reference || undefined,
-    });
-
-    this.logger.log(
-      `✅ Payment verified for booking ${bookingId}, event pushed.`,
-    );
-  }
-
   async getPayment(paymentId: string) {
     return this.prisma.payment.findUnique({ where: { id: paymentId } });
   }
@@ -234,13 +196,13 @@ export class PaymentsService {
     const searchUpCase = search.charAt(0).toUpperCase() + search.slice(1);
     const where = search
       ? {
-          OR: [
-            { userId: { contains: searchUpCase } },
-            { bookingId: { contains: searchUpCase } },
-            { reference: { contains: searchUpCase } },
-            { transactionId: { contains: searchUpCase } },
-          ],
-        }
+        OR: [
+          { userId: { contains: searchUpCase } },
+          { bookingId: { contains: searchUpCase } },
+          { reference: { contains: searchUpCase } },
+          { transactionId: { contains: searchUpCase } },
+        ],
+      }
       : {};
     const orderBy = { [sortBy]: sortOrder };
 
@@ -472,7 +434,6 @@ export class PaymentsService {
   }
 
   // Trong file payments.service.ts – dán vào cuối class
-
   async handleVnpayReturn(query: Record<string, any>) {
     this.logger.debug(
       `[handleVnpayReturn] Received query: ${JSON.stringify(query)}`,
