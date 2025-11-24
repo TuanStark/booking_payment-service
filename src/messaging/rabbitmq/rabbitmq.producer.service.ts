@@ -17,7 +17,7 @@ export class RabbitMQProducerService {
 
   constructor(
     @Inject('RABBITMQ_CLIENT') private readonly client: ClientProxy,
-  ) {}
+  ) { }
 
   async emitPaymentEvent(topic: string, data: PaymentEventData): Promise<void> {
     try {

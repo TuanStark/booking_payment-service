@@ -4,6 +4,10 @@ import { PaymentStatus, PaymentMethod } from './dto/enum';
 import { VietqrProvider } from './provider/vietqr.provider';
 import { PaymentVNPayProvider } from './provider/vnpay.provider';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import {
+  PayosWebhookData,
+  PayosWebhookType,
+} from './dto/payos/payos-webhook-body.payload';
 import { RabbitMQProducerService } from 'src/messaging/rabbitmq/rabbitmq.producer.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { FindAllDto } from 'src/common/global/find-all.dto';
@@ -117,6 +121,24 @@ export class PaymentsService {
 
       paymentUrl = vnpayResult.vnpUrl;
       reference = vnpTxnRef; // ← Lưu lại để IPN và return URL tìm đúng payment
+    } else if (method === PaymentMethod.VIETQR) {
+      const vietqrResult = await this.vietqr.createPayment({
+        amount: dto.amount,
+        bookingId: dto.bookingId,
+      });
+
+      if (!vietqrResult || !vietqrResult.data) {
+        this.logger.error(
+          `[createPayment] VietQR creation failed: ${JSON.stringify(vietqrResult)}`,
+        );
+        throw new BadRequestException(
+          `VietQR creation failed: ${vietqrResult?.desc || 'Unknown error'}`,
+        );
+      }
+
+      qrImageUrl = vietqrResult.data.qrCode || undefined;
+      paymentUrl = vietqrResult.data.checkoutUrl || undefined;
+      reference = vietqrResult.data.orderCode?.toString() || undefined;
     }
 
     // Tạo bản ghi payment trong DB
@@ -129,6 +151,8 @@ export class PaymentsService {
         qrImageUrl,
         paymentUrl,
         reference, // ← Với VNPay là vnp_TxnRef, với VietQR là reference
+        transactionId: reference,
+        paymentDate: new Date(),
         status: PaymentStatus.PENDING,
       },
     });
@@ -272,10 +296,6 @@ export class PaymentsService {
     return this.prisma.payment.findFirst({ where: { reference } });
   }
 
-  /**
-   * Tìm các payment đã hoàn thành (SUCCESS) trong khoảng thời gian
-   * Filter theo createdAt (thời điểm tạo payment)
-   */
   async findCompletedPayments(filters: {
     startDate: Date;
     endDate: Date;
@@ -433,111 +453,78 @@ export class PaymentsService {
     };
   }
 
-  // Trong file payments.service.ts – dán vào cuối class
-  async handleVnpayReturn(query: Record<string, any>) {
-    this.logger.debug(
-      `[handleVnpayReturn] Received query: ${JSON.stringify(query)}`,
-    );
+  async handleVietqrWebhook(body: PayosWebhookType) {
+    console.log(body);
+    this.logger.log(`[handleVietqrWebhook] Received webhook: ${JSON.stringify(body)}`);
 
-    const isValid = this.vnpay.verifyVNPaySignature(query);
-    if (!isValid) {
-      this.logger.warn(
-        `[handleVnpayReturn] Invalid signature for txn=${query.vnp_TxnRef}`,
-      );
-      throw new BadRequestException('Chữ ký không hợp lệ');
+    let data: PayosWebhookData;
+    try {
+      data = this.vietqr.verifyWebhook(body);
+    } catch (error) {
+      this.logger.error(`[handleVietqrWebhook] Verification failed: ${error.message}`);
+      return { success: false, message: error.message };
     }
 
-    const txnRef = query.vnp_TxnRef as string;
-    const responseCode = query.vnp_ResponseCode as string;
+    const { orderCode, amount, code, desc } = data;
+    const reference = orderCode.toString();
 
     const payment = await this.prisma.payment.findFirst({
-      where: { reference: txnRef, method: 'VNPAY' },
+      where: { reference, method: PaymentMethod.VIETQR },
     });
 
     if (!payment) {
-      this.logger.warn(
-        `[handleVnpayReturn] Payment not found for reference=${txnRef}`,
-      );
-      throw new BadRequestException('Không tìm thấy giao dịch');
+      this.logger.warn(`[handleVietqrWebhook] Payment not found for ref=${reference}`);
+      return { success: false, message: 'Payment not found' };
     }
 
-    if (responseCode === '00') {
-      this.logger.log(
-        `[handleVnpayReturn] Payment success txn=${txnRef} booking=${payment.bookingId}`,
-      );
-      await this.updateStatusByPaymentId(
-        payment.id,
-        PaymentStatus.SUCCESS,
-        query.vnp_TransactionNo,
-      );
-      return { success: true, payment };
-    } else {
+    // Check amount
+    if (payment.amount !== amount) {
       this.logger.warn(
-        `[handleVnpayReturn] Payment failed txn=${txnRef} code=${responseCode}`,
+        `[handleVietqrWebhook] Amount mismatch ref=${reference} expected=${payment.amount} received=${amount}`,
       );
-      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
-      return { success: false, code: responseCode };
-    }
-  }
-
-  async handleVnpayIpn(query: Record<string, any>) {
-    this.logger.log(`VNPay IPN received: ${JSON.stringify(query)}`);
-
-    const isValid = this.vnpay.verifyVNPaySignature(query);
-    if (!isValid) {
-      this.logger.warn(
-        `[handleVnpayIpn] Invalid signature for txn=${query.vnp_TxnRef}`,
-      );
-      return { RspCode: '97', Message: 'Fail checksum' };
+      return { success: false, message: 'Amount mismatch' };
     }
 
-    const txnRef = query.vnp_TxnRef as string;
-    const amount = Number(query.vnp_Amount) / 100;
-    const responseCode = query.vnp_ResponseCode as string;
-
-    const payment = await this.prisma.payment.findFirst({
-      where: { reference: txnRef, method: 'VNPAY' },
-    });
-
-    if (!payment) {
-      this.logger.warn(
-        `[handleVnpayIpn] Payment not found for reference=${txnRef}`,
-      );
-      return { RspCode: '02', Message: 'Order not found' };
-    }
-
-    // Kiểm tra số tiền có đúng không
-    if (amount !== payment.amount) {
-      this.logger.warn(
-        `[handleVnpayIpn] Amount mismatch txn=${txnRef} expected=${payment.amount} received=${amount}`,
-      );
-      return { RspCode: '04', Message: 'Invalid amount' };
-    }
-
-    // Tránh xử lý 2 lần
+    // Check status
     if (payment.status === PaymentStatus.SUCCESS) {
-      this.logger.debug(
-        `[handleVnpayIpn] Payment already success txn=${txnRef}`,
-      );
-      return { RspCode: '00', Message: 'Confirm success' };
+      this.logger.log(`[handleVietqrWebhook] Payment already success ref=${reference}`);
+      return { success: true, message: 'Already success' };
     }
 
-    if (responseCode === '00') {
-      this.logger.log(
-        `[handleVnpayIpn] Payment success txn=${txnRef} booking=${payment.bookingId}`,
-      );
+    if (code === '00') {
+      this.logger.log(`[handleVietqrWebhook] Payment success ref=${reference}`);
       await this.updateStatusByPaymentId(
         payment.id,
         PaymentStatus.SUCCESS,
-        query.vnp_TransactionNo,
+        data.paymentLinkId || undefined,
       );
-      return { RspCode: '00', Message: 'Confirm success' };
+      const topic = 'payment.success';
+      await this.rabbitmq.emitPaymentEvent(topic, {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        amount: payment.amount,
+        status: payment.status,
+        transactionId: payment.transactionId || undefined,
+        reference: payment.reference || undefined,
+      });
+
+      this.logger.log(`Payment ${payment.id} => ${payment.status}, published ${topic}`);
     } else {
-      this.logger.warn(
-        `[handleVnpayIpn] Payment failed txn=${txnRef} code=${responseCode}`,
-      );
+      this.logger.warn(`[handleVietqrWebhook] Payment failed ref=${reference} code=${code} desc=${desc}`);
       await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
-      return { RspCode: '99', Message: 'Payment failed' };
+      const topic = 'payment.failed';
+      await this.rabbitmq.emitPaymentEvent(topic, {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        amount: payment.amount,
+        status: payment.status,
+        transactionId: payment.transactionId || undefined,
+        reference: payment.reference || undefined,
+      });
+
+      this.logger.log(`Payment ${payment.id} => ${payment.status}, published ${topic}`);
     }
+
+    return { success: true };
   }
 }

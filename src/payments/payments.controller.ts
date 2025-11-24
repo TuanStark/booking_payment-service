@@ -10,6 +10,7 @@ import { ResponseData } from 'src/common/global/globalClass';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentVNPayProvider } from './provider/vnpay.provider';
 import { VietqrProvider } from './provider/vietqr.provider';
+import type { PayosWebhookType } from './dto/payos/payos-webhook-body.payload';
 
 @Controller('payments')
 export class PaymentsController {
@@ -20,28 +21,7 @@ export class PaymentsController {
     private readonly vnpayProvider: PaymentVNPayProvider,
     private readonly vietqrProvider: VietqrProvider,
     private readonly configService: ConfigService,
-  ) {}
-
-  // @Post('vnpay/create')
-  // async createVNPayPayment(@Body() createVNPayPaymentDto: CreateVNPayPaymentDto) {
-  //   try {
-  //     const paymentResponse = await this.vnpayProvider.createVNPayPayment(createVNPayPaymentDto);
-  //     return new ResponseData(paymentResponse, HttpStatus.CREATED, HttpMessage.CREATED);
-  //   } catch (error) {
-  //     throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-  //   }
-  // }
-
-  @Post('vnpay/verify')
-  async verifyVNPaySignature(@Body() vnpParams: any) {
-    try {
-      const isValid = this.vnpayProvider.verifyVNPaySignature(vnpParams);
-      return new ResponseData({ isValid, params: vnpParams }, HttpStatus.SUCCESS, HttpMessage.SUCCESS);
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.BAD_REQUEST);
-    }
-  }
-
+  ) { }
   /**
    * Lấy IP address từ request (giống logic code mẫu VNPay)
    */
@@ -63,7 +43,7 @@ export class PaymentsController {
     // Extract userId from x-user-id header sent by API Gateway
     const userId = req.headers['x-user-id'] as string;
     const clientIp = this.getClientIp(req);
-    
+
     this.logger.debug(
       `[create] Payment request: userId=${userId}, method=${createPaymentDto.method}, amount=${createPaymentDto.amount}, ip=${clientIp}`,
     );
@@ -116,50 +96,16 @@ export class PaymentsController {
     );
   }
 
-  @Get('/vnpay/return')
-  async vnpayReturn(@Query() query: Record<string, any>, @Res() res: Response) {
-    try {
-      // Dùng service để xử lý (sẽ viết ở dưới)
-      const result = await this.paymentsService.handleVnpayReturn(query);
-
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
-
-      if (result.success) {
-        // Chuyển về frontend của bạn (React/Vue/Next.js...)
-        return res.redirect(
-          `${frontendUrl}/payment/success?bookingId=${result.payment?.bookingId}`,
-        );
-      } else {
-        return res.redirect(
-          `${frontendUrl}/payment/failed?code=${result.code || '99'}`,
-        );
-      }
-    } catch (error) {
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
-      return res.redirect(
-        `${frontendUrl}/payment/failed?code=99`,
-      );
-    }
-  }
-
-  // IPN – BẮT BUỘC PHẢI CÓ (VNPay gọi về server)
-  @Post('/vnpay/ipn')
-  async vnpayIpn(@Req() req: Request, @Res() res: Response) {
-    const result = await this.paymentsService.handleVnpayIpn(req.query as any);
-
-    // VNPay yêu cầu trả về JSON đúng format
-    return res.json(result);
-  }
-
-// vietqr
+  // vietqr
   @Post('vietqr/create')
   async createPayment(@Body() body: CreatePaymentDto): Promise<any> {
     return this.vietqrProvider.createPayment(body);
   }
 
   @Post('webhook')
-  handleWebhook() {
-    return this.vietqrProvider.handleWebhook();
+  handleWebhook(@Body() body: PayosWebhookType) {
+    console.log("body webhook", body);
+    return this.paymentsService.handleVietqrWebhook(body);
   }
 
   /**
