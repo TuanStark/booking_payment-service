@@ -10,7 +10,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model Payment {
@@ -22,7 +21,7 @@ model Payment {
   qrImageUrl    String?       @map("qr_image_url")
   paymentUrl    String?       @map("payment_url")
   transactionId String?       @map("transaction_id") // từ bank / VNPAY nếu có
-  reference     String?       // mã bạn chèn trong nội dung chuyển khoản (e.g. BOOKING_123)
+  reference     String? // mã bạn chèn trong nội dung chuyển khoản (e.g. BOOKING_123)
   status        PaymentStatus @default(PENDING)
   paymentDate   DateTime?     @map("payment_date") // thời gian thanh toán thành công
   createdAt     DateTime      @default(now()) @map("created_at")
