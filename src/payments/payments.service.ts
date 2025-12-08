@@ -527,4 +527,75 @@ export class PaymentsService {
 
     return { success: true };
   }
+
+  /**
+   * Get payment statistics for dashboard
+   */
+  async getStats(year?: number) {
+    const currentYear = year || new Date().getFullYear();
+
+    const [total, pending, success, failed, totalRevenueResult] =
+      await Promise.all([
+        this.prisma.payment.count(),
+        this.prisma.payment.count({ where: { status: PaymentStatus.PENDING } }),
+        this.prisma.payment.count({ where: { status: PaymentStatus.SUCCESS } }),
+        this.prisma.payment.count({ where: { status: PaymentStatus.FAILED } }),
+        this.prisma.payment.aggregate({
+          where: { status: PaymentStatus.SUCCESS },
+          _sum: { amount: true },
+        }),
+      ]);
+
+    const totalRevenue = totalRevenueResult._sum.amount || 0;
+
+    // Get monthly revenue using existing method
+    const monthlyRevenueData = await this.getMonthlyRevenue({
+      year: currentYear,
+    });
+
+    // Calculate growth
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    const [revenueThisMonth, revenueLastMonth] = await Promise.all([
+      this.prisma.payment.aggregate({
+        where: {
+          status: PaymentStatus.SUCCESS,
+          createdAt: { gte: startOfMonth },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.payment.aggregate({
+        where: {
+          status: PaymentStatus.SUCCESS,
+          createdAt: { gte: lastMonth, lte: endOfLastMonth },
+        },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const thisMonthAmount = revenueThisMonth._sum.amount || 0;
+    const lastMonthAmount = revenueLastMonth._sum.amount || 0;
+
+    const revenueGrowth =
+      lastMonthAmount > 0
+        ? ((thisMonthAmount - lastMonthAmount) / lastMonthAmount) * 100
+        : thisMonthAmount > 0
+          ? 100
+          : 0;
+
+    return {
+      totalPayments: total,
+      pendingPayments: pending,
+      successPayments: success,
+      failedPayments: failed,
+      totalRevenue,
+      revenueThisMonth: thisMonthAmount,
+      revenueLastMonth: lastMonthAmount,
+      revenueGrowth: Math.round(revenueGrowth * 100) / 100,
+      monthlyRevenue: monthlyRevenueData.data,
+    };
+  }
 }

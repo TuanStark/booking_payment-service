@@ -83,6 +83,20 @@ export class PaymentsController {
     }
   }
 
+  /**
+   * Get payment statistics for dashboard
+   * GET /payments/stats
+   */
+  @Get('stats')
+  async getStats(@Query('year') year?: number) {
+    try {
+      const stats = await this.paymentsService.getStats(year);
+      return new ResponseData(stats, HttpStatus.SUCCESS, HttpMessage.SUCCESS);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   // manual verify endpoint (for testing)
   @Post(':id/verify')
   async manualVerify(
