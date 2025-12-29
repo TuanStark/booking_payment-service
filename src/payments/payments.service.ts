@@ -80,65 +80,19 @@ export class PaymentsService {
       reference = vietqrResult.data.orderCode.toString() || undefined;
     } else if (method === PaymentMethod.VNPAY) {
       // === VNPAY ===
-      // Lấy return URL từ env hoặc tự động tạo từ base URL
-      let returnUrl = this.configService.get<string>('VNPAY_RETURN_URL');
-
-      if (!returnUrl) {
-        // Tự động tạo từ PAYMENT_SERVICE_URL hoặc BASE_URL
-        const baseUrl =
-          this.configService.get<string>('PAYMENT_SERVICE_URL') ||
-          this.configService.get<string>('BASE_URL') ||
-          this.configService.get<string>('API_URL');
-
-        if (baseUrl) {
-          returnUrl = `${baseUrl.replace(/\/$/, '')}/payments/vnpay/return`;
-        } else {
-          throw new BadRequestException(
-            'VNPAY_RETURN_URL hoặc PAYMENT_SERVICE_URL/BASE_URL chưa được cấu hình trong .env. ' +
-            'Vui lòng cấu hình VNPAY_RETURN_URL với URL đầy đủ (ví dụ: https://yourdomain.com/payments/vnpay/return) ' +
-            'và đăng ký URL này trong VNPay dashboard.',
-          );
-        }
-      }
-
       const ipAddr = (dto as any).ipAddr || '127.0.0.1';
-
-      // Tạo mã giao dịch VNPay DUY NHẤT (rất quan trọng!)
       const vnpTxnRef = generateVnpayTxnRef();
 
-      this.logger.debug(
-        `[createPayment] VNPay config resolved returnUrl=${returnUrl}`,
-      );
-
       const vnpayResult = await this.vnpay.createVNPayPayment({
-        orderId: vnpTxnRef, // ← Không dùng bookingId trực tiếp
+        orderId: vnpTxnRef,
         amount: dto.amount,
         orderInfo: `Thanh toan booking ${dto.bookingId}`,
-        returnUrl, // ← Lấy từ .env, đảm bảo đúng
         ipAddr,
         locale: 'vn',
       });
 
       paymentUrl = vnpayResult.vnpUrl;
-      reference = vnpTxnRef; // ← Lưu lại để IPN và return URL tìm đúng payment
-    } else if (method === PaymentMethod.VIETQR) {
-      const vietqrResult = await this.vietqr.createPayment({
-        amount: dto.amount,
-        bookingId: dto.bookingId,
-      });
-
-      if (!vietqrResult || !vietqrResult.data) {
-        this.logger.error(
-          `[createPayment] VietQR creation failed: ${JSON.stringify(vietqrResult)}`,
-        );
-        throw new BadRequestException(
-          `VietQR creation failed: ${vietqrResult?.desc || 'Unknown error'}`,
-        );
-      }
-
-      qrImageUrl = vietqrResult.data.qrCode || undefined;
-      paymentUrl = vietqrResult.data.checkoutUrl || undefined;
-      reference = vietqrResult.data.orderCode?.toString() || undefined;
+      reference = vnpTxnRef;
     }
 
     // Tạo bản ghi payment trong DB

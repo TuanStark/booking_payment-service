@@ -97,25 +97,6 @@ export class PaymentsController {
     }
   }
 
-  // manual verify endpoint (for testing)
-  @Post(':id/verify')
-  async manualVerify(
-    @Param('id') id: string,
-    @Body() verifyPaymentDto: VerifyPaymentDto,
-  ) {
-    return this.paymentsService.updateStatusByPaymentId(
-      id,
-      PaymentStatus.SUCCESS,
-      verifyPaymentDto.transactionId,
-    );
-  }
-
-  // vietqr
-  @Post('vietqr/create')
-  async createPayment(@Body() body: CreatePaymentDto): Promise<any> {
-    return this.vietqrProvider.createPayment(body);
-  }
-
   @Post('webhook')
   handleWebhook(@Body() body: PayosWebhookType) {
     console.log("body webhook", body);
