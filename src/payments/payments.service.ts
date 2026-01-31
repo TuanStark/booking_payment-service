@@ -552,4 +552,225 @@ export class PaymentsService {
       monthlyRevenue: monthlyRevenueData.data,
     };
   }
+
+  /**
+   * Handle VNPay return callback
+   * Verify signature, update payment status, emit RabbitMQ event
+   */
+  async handleVNPayReturn(query: any): Promise<{
+    success: boolean;
+    message: string;
+    paymentId?: string;
+    bookingId?: string;
+    status?: PaymentStatus;
+  }> {
+    this.logger.log(`[handleVNPayReturn] Received VNPay return: ${JSON.stringify(query)}`);
+
+    // Verify signature
+    const isValidSignature = this.vnpay.verifyVNPaySignature(query);
+    if (!isValidSignature) {
+      this.logger.warn('[handleVNPayReturn] Invalid signature');
+      return { success: false, message: 'Invalid signature' };
+    }
+
+    // Extract VNPay response data
+    const vnpResponseCode = query.vnp_ResponseCode;
+    const vnpTxnRef = query.vnp_TxnRef;
+    const vnpAmount = parseInt(query.vnp_Amount, 10) / 100; // VNPay amount is in cents
+    const vnpTransactionNo = query.vnp_TransactionNo;
+
+    // Find payment by reference (vnp_TxnRef)
+    const payment = await this.prisma.payment.findFirst({
+      where: { reference: vnpTxnRef, method: PaymentMethod.VNPAY },
+    });
+
+    if (!payment) {
+      this.logger.warn(`[handleVNPayReturn] Payment not found for ref=${vnpTxnRef}`);
+      return { success: false, message: 'Payment not found' };
+    }
+
+    // Check if already processed
+    if (payment.status === PaymentStatus.SUCCESS) {
+      this.logger.log(`[handleVNPayReturn] Payment already success ref=${vnpTxnRef}`);
+      return {
+        success: true,
+        message: 'Already processed',
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        status: PaymentStatus.SUCCESS,
+      };
+    }
+
+    // Check amount match
+    if (payment.amount !== vnpAmount) {
+      this.logger.warn(
+        `[handleVNPayReturn] Amount mismatch ref=${vnpTxnRef} expected=${payment.amount} received=${vnpAmount}`,
+      );
+      return { success: false, message: 'Amount mismatch' };
+    }
+
+    // Process based on response code
+    if (vnpResponseCode === '00') {
+      // Payment successful
+      this.logger.log(`[handleVNPayReturn] Payment success ref=${vnpTxnRef}`);
+
+      // Update payment status
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.SUCCESS,
+          transactionId: vnpTransactionNo,
+          paymentDate: new Date(),
+        },
+      });
+
+      // Emit RabbitMQ event for booking service
+      await this.rabbitmq.emitPaymentEvent('payment.success', {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        amount: payment.amount,
+        status: PaymentStatus.SUCCESS,
+        transactionId: vnpTransactionNo,
+        reference: vnpTxnRef,
+      });
+
+      this.logger.log(`[handleVNPayReturn] Payment ${payment.id} => SUCCESS, published payment.success`);
+
+      return {
+        success: true,
+        message: 'Payment successful',
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        status: PaymentStatus.SUCCESS,
+      };
+    } else {
+      // Payment failed
+      this.logger.warn(`[handleVNPayReturn] Payment failed ref=${vnpTxnRef} code=${vnpResponseCode}`);
+
+      // Update payment status
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.FAILED,
+          transactionId: vnpTransactionNo || undefined,
+        },
+      });
+
+      // Emit RabbitMQ event
+      await this.rabbitmq.emitPaymentEvent('payment.failed', {
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        amount: payment.amount,
+        status: PaymentStatus.FAILED,
+        transactionId: vnpTransactionNo || undefined,
+        reference: vnpTxnRef,
+      });
+
+      this.logger.log(`[handleVNPayReturn] Payment ${payment.id} => FAILED, published payment.failed`);
+
+      return {
+        success: false,
+        message: `Payment failed with code: ${vnpResponseCode}`,
+        paymentId: payment.id,
+        bookingId: payment.bookingId,
+        status: PaymentStatus.FAILED,
+      };
+    }
+  }
+
+  /**
+   * Handle VNPay IPN (Instant Payment Notification)
+   * Server-to-server callback for reliability
+   */
+  async handleVNPayIpn(query: any): Promise<{ RspCode: string; Message: string }> {
+    this.logger.log(`[handleVNPayIpn] Received VNPay IPN: ${JSON.stringify(query)}`);
+
+    try {
+      // 1. Verify signature
+      const isValidSignature = this.vnpay.verifyVNPaySignature(query);
+      if (!isValidSignature) {
+        this.logger.warn('[handleVNPayIpn] Invalid signature');
+        return { RspCode: '97', Message: 'Invalid signature' };
+      }
+
+      // 2. Extract data
+      const vnpTxnRef = query.vnp_TxnRef;
+      const vnpAmount = parseInt(query.vnp_Amount, 10) / 100;
+      const vnpResponseCode = query.vnp_ResponseCode;
+      const vnpTransactionNo = query.vnp_TransactionNo;
+
+      // 3. Find payment
+      const payment = await this.prisma.payment.findFirst({
+        where: { reference: vnpTxnRef, method: PaymentMethod.VNPAY },
+      });
+
+      if (!payment) {
+        this.logger.warn(`[handleVNPayIpn] Order not found ref=${vnpTxnRef}`);
+        return { RspCode: '01', Message: 'Order not found' };
+      }
+
+      // 4. Check amount
+      if (payment.amount !== vnpAmount) {
+        this.logger.warn(`[handleVNPayIpn] Amount mismatch ref=${vnpTxnRef} expected=${payment.amount} received=${vnpAmount}`);
+        return { RspCode: '04', Message: 'Amount mismatch' };
+      }
+
+      // 5. Check if already processed
+      if (payment.status !== PaymentStatus.PENDING) {
+        this.logger.log(`[handleVNPayIpn] Order already processed ref=${vnpTxnRef} status=${payment.status}`);
+        return { RspCode: '02', Message: 'Order already confirmed' };
+      }
+
+      // 6. Update status based on response code
+      if (vnpResponseCode === '00') {
+        // Success
+        await this.prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: PaymentStatus.SUCCESS,
+            transactionId: vnpTransactionNo,
+            paymentDate: new Date(),
+          },
+        });
+
+        // Emit message to RabbitMQ
+        await this.rabbitmq.emitPaymentEvent('payment.success', {
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          amount: payment.amount,
+          status: PaymentStatus.SUCCESS,
+          transactionId: vnpTransactionNo,
+          reference: vnpTxnRef,
+        });
+
+        this.logger.log(`[handleVNPayIpn] Payment SUCCESS confirmed ref=${vnpTxnRef}`);
+      } else {
+        // Failed
+        await this.prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: PaymentStatus.FAILED,
+            transactionId: vnpTransactionNo || undefined,
+          },
+        });
+
+        // Emit message to RabbitMQ
+        await this.rabbitmq.emitPaymentEvent('payment.failed', {
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          amount: payment.amount,
+          status: PaymentStatus.FAILED,
+          transactionId: vnpTransactionNo || undefined,
+          reference: vnpTxnRef,
+        });
+
+        this.logger.log(`[handleVNPayIpn] Payment FAILED confirmed ref=${vnpTxnRef} code=${vnpResponseCode}`);
+      }
+
+      return { RspCode: '00', Message: 'Confirm Success' };
+    } catch (error) {
+      this.logger.error(`[handleVNPayIpn] Error: ${error.message}`, error.stack);
+      return { RspCode: '99', Message: 'Unknown error' };
+    }
+  }
 }

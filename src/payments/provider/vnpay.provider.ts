@@ -29,7 +29,7 @@ export class PaymentVNPayProvider {
   private readonly vnpCommand = 'pay';
   private readonly vnpCurrCode = 'VND';
 
-  private readonly vnpReturnUrl = process.env.VNPAY_RETURN_URL || 'http://localhost:3004/payments/vnpay/return';
+  private readonly vnpReturnUrl = process.env.VNPAY_RETURN_URL || 'http://localhost:4000/payment/vnpay/return';
 
   // PHP-style URL encode (spaces become '+' instead of '%20')
   private urlEncode(str: string): string {

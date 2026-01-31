@@ -130,4 +130,34 @@ export class PaymentsController {
       throw new BadRequestException(error.message);
     }
   }
+
+  @Get('vnpay/return')
+  async handleVNPayReturn(@Query() query: any, @Res() res: Response) {
+    this.logger.log(`[VNPay Return] Received: ${JSON.stringify(query)}`);
+
+    try {
+      const result = await this.paymentsService.handleVNPayReturn(query);
+
+      // Get frontend URL from config
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+
+      if (result.success && result.status === 'SUCCESS') {
+        // Redirect to success page
+        return res.redirect(`${frontendUrl}/payment/success?bookingId=${result.bookingId}&paymentId=${result.paymentId}`);
+      } else {
+        // Redirect to failure page
+        return res.redirect(`${frontendUrl}/payment/failed?bookingId=${result.bookingId || ''}&message=${encodeURIComponent(result.message)}`);
+      }
+    } catch (error) {
+      this.logger.error(`[VNPay Return] Error: ${error.message}`);
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+      return res.redirect(`${frontendUrl}/payment/failed?message=${encodeURIComponent('Payment processing error')}`);
+    }
+  }
+
+  @Get('vnpay/ipn')
+  async handleVNPayIpn(@Query() query: any) {
+    this.logger.log(`[VNPay IPN] Received: ${JSON.stringify(query)}`);
+    return this.paymentsService.handleVNPayIpn(query);
+  }
 }
