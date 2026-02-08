@@ -12,6 +12,8 @@ import { PaymentVNPayProvider } from './provider/vnpay.provider';
 import { VietqrProvider } from './provider/vietqr.provider';
 import type { PayosWebhookType } from './dto/payos/payos-webhook-body.payload';
 
+import { Webhook as PayosSdkWebhook } from '@payos/node';
+
 @Controller('payments')
 export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
@@ -97,10 +99,36 @@ export class PaymentsController {
     }
   }
 
+  // Legacy VietQR Webhook (keep for compatibility if needed, or rename)
   @Post('webhook')
   handleWebhook(@Body() body: PayosWebhookType) {
     console.log("body webhook", body);
     return this.paymentsService.handleVietqrWebhook(body);
+  }
+
+  // New PayOS Webhook
+  @Post('payos/webhook')
+  handlePayosWebhook(@Body() body: any) {
+    return this.paymentsService.handlePayosWebhook(body);
+  }
+
+  // MoMo Return URL
+  @Get('momo/return')
+  async handleMomoReturn(@Query() query: any, @Res() res: Response) {
+    const result = await this.paymentsService.handleMomoReturn(query);
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+
+    if (result.success) {
+      return res.redirect(`${frontendUrl}/payment/success?bookingId=${result.bookingId}&paymentId=${result.paymentId}`);
+    } else {
+      return res.redirect(`${frontendUrl}/payment/failed?message=${encodeURIComponent(result.message)}`);
+    }
+  }
+
+  // MoMo IPN
+  @Post('momo/ipn')
+  async handleMomoIpn(@Body() body: any) {
+    return this.paymentsService.handleMomoIpn(body);
   }
 
   /**

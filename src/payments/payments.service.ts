@@ -8,11 +8,14 @@ import {
   PayosWebhookData,
   PayosWebhookType,
 } from './dto/payos/payos-webhook-body.payload';
+import { Webhook as PayosSdkWebhook, WebhookData as PayosSdkWebhookData } from '@payos/node';
 import { RabbitMQProducerService } from 'src/messaging/rabbitmq/rabbitmq.producer.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { FindAllDto } from 'src/common/global/find-all.dto';
 import { ExternalService } from 'src/common/external/external.service';
 import { generateBookingCode } from 'src/utils/generate-code';
+import { PaymentMomoProvider } from './provider/momo.provider';
+import { PayosProvider } from './provider/payos.provider';
 
 @Injectable()
 export class PaymentsService {
@@ -24,6 +27,8 @@ export class PaymentsService {
     private readonly vnpay: PaymentVNPayProvider,
     private readonly rabbitmq: RabbitMQProducerService,
     private readonly externalService: ExternalService,
+    private readonly momo: PaymentMomoProvider,
+    private readonly payos: PayosProvider,
     private readonly configService: ConfigService,
   ) { }
 
@@ -31,7 +36,9 @@ export class PaymentsService {
     const normalized = String(method).toUpperCase();
     if (
       normalized !== PaymentMethod.VIETQR &&
-      normalized !== PaymentMethod.VNPAY
+      normalized !== PaymentMethod.VNPAY &&
+      normalized !== PaymentMethod.MOMO &&
+      normalized !== PaymentMethod.PAYOS
     ) {
       throw new BadRequestException('Unsupported provider');
     }
@@ -54,6 +61,7 @@ export class PaymentsService {
     let qrImageUrl: string | undefined;
     let paymentUrl: string | undefined;
     let reference: string | undefined;
+    let orderCode: bigint | undefined;
 
     // Tạo mã giao dịch duy nhất cho VNPay (bắt buộc phải unique toàn hệ thống)
     const generateVnpayTxnRef = () => {
@@ -93,6 +101,32 @@ export class PaymentsService {
 
       paymentUrl = vnpayResult.vnpUrl;
       reference = vnpTxnRef;
+    } else if (method === PaymentMethod.MOMO) {
+      const momoResult = await this.momo.createMoMoPayment({
+        amount: dto.amount,
+        orderId: `BK_${dto.bookingId}_${Date.now()}`, // Simple unique orderId
+        orderInfo: `Thanh toan booking ${dto.bookingId}`,
+        redirectUrl: this.configService.get('MOMO_REDIRECT_URL') || 'http://localhost:4000/payments/momo/return',
+        ipnUrl: this.configService.get('MOMO_IPN_URL') || 'http://localhost:4000/payments/momo/ipn',
+      });
+      console.log("momoResult", momoResult);
+      paymentUrl = momoResult.payUrl || undefined;
+      reference = momoResult.orderId.toString() || undefined;
+    } else if (method === PaymentMethod.PAYOS) {
+      const timestamp = Date.now();
+      const random = Math.floor(Math.random() * 100);
+      orderCode = BigInt(`${timestamp}${random}`);
+
+      const payosResult = await this.payos.createPaymentLink({
+        orderCode: Number(orderCode),
+        amount: dto.amount,
+        description: `Booking ${dto.bookingId}`,
+        cancelUrl: this.configService.get<string>('FRONTEND_URL') + '/payment/cancel' || 'http://localhost:5173/payment/cancel',
+        returnUrl: this.configService.get<string>('FRONTEND_URL') + '/payment/success' || 'http://localhost:5173/payment/success',
+      });
+
+      paymentUrl = payosResult.checkoutUrl;
+      reference = payosResult.orderCode.toString();
     }
 
     // Tạo bản ghi payment trong DB
@@ -104,8 +138,9 @@ export class PaymentsService {
         method,
         qrImageUrl,
         paymentUrl,
-        reference, // ← Với VNPay là vnp_TxnRef, với VietQR là reference
+        reference, // ← Với VNPay là vnp_TxnRef, với VietQR/PayOS là reference/orderCode
         transactionId: reference,
+        orderCode: orderCode, // Save BigInt orderCode
         paymentDate: new Date(),
         status: PaymentStatus.PENDING,
       },
@@ -116,6 +151,140 @@ export class PaymentsService {
     );
 
     return payment;
+  }
+
+  // Handle PayOS Webhook
+  async handlePayosWebhook(body: PayosSdkWebhook) {
+    this.logger.log(`[handlePayosWebhook] Received webhook`);
+
+    let data: PayosSdkWebhookData;
+    try {
+      data = await this.payos.verifyWebhookData(body);
+    } catch (error) {
+      this.logger.error(`[handlePayosWebhook] Verification failed: ${error.message}`);
+      return { success: false, message: error.message };
+    }
+
+    const { orderCode, amount, code, desc, reference } = data;
+    const refString = orderCode.toString();
+
+    // Find payment by orderCode (stored in reference or orderCode field)
+    // Since we save orderCode in `reference` for PayOS, we can search by that.
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        OR: [
+          { reference: refString },
+          { orderCode: BigInt(orderCode) }
+        ],
+        method: PaymentMethod.PAYOS
+      },
+    });
+
+    if (!payment) {
+      this.logger.warn(`[handlePayosWebhook] Payment not found for orderCode=${orderCode}`);
+      return { success: false, message: 'Payment not found' };
+    }
+
+    // Check amount
+    if (payment.amount !== amount) {
+      this.logger.warn(
+        `[handlePayosWebhook] Amount mismatch orderCode=${orderCode} expected=${payment.amount} received=${amount}`,
+      );
+      return { success: false, message: 'Amount mismatch' };
+    }
+
+    if (code === '00') {
+      this.logger.log(`[handlePayosWebhook] Payment success orderCode=${orderCode}`);
+      await this.updateStatusByPaymentId(
+        payment.id,
+        PaymentStatus.SUCCESS,
+        reference || undefined, // PayOS reference (transaction ID from bank)
+      );
+    } else {
+      this.logger.warn(`[handlePayosWebhook] Payment failed orderCode=${orderCode} code=${code}`);
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Handle MoMo Return URL (Redirect)
+   */
+  async handleMomoReturn(query: any) {
+    this.logger.log(`[handleMomoReturn] Query: ${JSON.stringify(query)}`);
+    const { orderId, resultCode, message } = query;
+
+    // Verify signature if needed (Momo usually returns signature in redirect, but strictly ipn is safer)
+    // For redirect, we just update UI status, but double check with DB
+
+    const payment = await this.prisma.payment.findFirst({
+      where: { reference: orderId, method: PaymentMethod.MOMO },
+    });
+
+    if (!payment) {
+      return {
+        success: false,
+        message: 'Payment not found',
+      };
+    }
+
+    let status = PaymentStatus.PENDING;
+    if (resultCode === '0') {
+      status = PaymentStatus.SUCCESS;
+    } else {
+      status = PaymentStatus.FAILED;
+    }
+
+    // Only update if not already success (IPN might have come first)
+    if (payment.status !== PaymentStatus.SUCCESS) {
+      await this.updateStatusByPaymentId(payment.id, status);
+    }
+
+    return {
+      success: resultCode === '0',
+      message,
+      paymentId: payment.id,
+      bookingId: payment.bookingId,
+    };
+  }
+
+  /**
+   * Handle MoMo IPN
+   */
+  async handleMomoIpn(body: any) {
+    this.logger.log(`[handleMomoIpn] Body: ${JSON.stringify(body)}`);
+
+    // Verify signature
+    const isValid = this.momo.verifyMoMoSignature(body);
+    if (!isValid) {
+      this.logger.error('[handleMomoIpn] Invalid signature');
+      return { status: 400, message: 'Invalid signature' }; // Momo expects simple response or 204
+    }
+
+    const { orderId, resultCode, amount, transId } = body;
+
+    const payment = await this.prisma.payment.findFirst({
+      where: { reference: orderId, method: PaymentMethod.MOMO },
+    });
+
+    if (!payment) {
+      this.logger.warn(`[handleMomoIpn] Payment not found ref=${orderId}`);
+      return { status: 404, message: 'Payment not found' };
+    }
+
+    if (payment.amount !== amount) {
+      this.logger.warn(`[handleMomoIpn] Amount mismatch`);
+      // Continue or fail?
+    }
+
+    if (resultCode === 0) {
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.SUCCESS, transId.toString());
+    } else {
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED, transId.toString());
+    }
+
+    return { status: 204 }; // Momo expects 204 No Content for success
   }
 
   // update status and publish rabbitmq

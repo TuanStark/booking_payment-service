@@ -7,6 +7,8 @@ import { RabbitMQModule } from 'src/messaging/rabbitmq/rabbitmq.module';
 import { RabbitMQConsumerController } from '../messaging/rabbitmq/rabbitmq.consumer';
 import { ExternalModule } from '../common/external/external.module';
 import { PaymentVNPayProvider } from './provider/vnpay.provider';
+import { PaymentMomoProvider } from './provider/momo.provider';
+import { PayosProvider } from './provider/payos.provider';
 
 @Module({
   imports: [forwardRef(() => RabbitMQModule), ExternalModule, HttpModule],
@@ -15,6 +17,8 @@ import { PaymentVNPayProvider } from './provider/vnpay.provider';
     PaymentsService,
     VietqrProvider,
     PaymentVNPayProvider,
+    PaymentMomoProvider,
+    PayosProvider,
   ],
   exports: [PaymentsService],
 })
