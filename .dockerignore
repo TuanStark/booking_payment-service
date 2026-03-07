@@ -1,0 +1,36 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-error.log
+
+# Build output
+dist
+build
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Dev tools
+.git
+.gitignore
+.dockerignore
+
+# IDE / OS
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test / Coverage
+coverage
+**/*.spec.ts
+**/*.test.ts
+test
+
+# Logs
+logs
+*.log

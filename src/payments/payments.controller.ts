@@ -12,7 +12,7 @@ import { PaymentVNPayProvider } from './provider/vnpay.provider';
 import { VietqrProvider } from './provider/vietqr.provider';
 import type { PayosWebhookType } from './dto/payos/payos-webhook-body.payload';
 
-import { Webhook as PayosSdkWebhook } from '@payos/node';
+// import { Webhook as PayosSdkWebhook } from '@payos/node';
 
 @Controller('payments')
 export class PaymentsController {
@@ -60,10 +60,6 @@ export class PaymentsController {
     } as any);
   }
 
-  @Get(':id')
-  async get(@Param('id') id: string) {
-    return this.paymentsService.getPayment(id);
-  }
 
   @Get()
   async findAll(@Query() query: FindAllDto, @Req() req: Request) {
@@ -187,5 +183,10 @@ export class PaymentsController {
   async handleVNPayIpn(@Query() query: any) {
     this.logger.log(`[VNPay IPN] Received: ${JSON.stringify(query)}`);
     return this.paymentsService.handleVNPayIpn(query);
+  }
+
+  @Get(':id')
+  async get(@Param('id') id: string) {
+    return this.paymentsService.getPayment(id);
   }
 }

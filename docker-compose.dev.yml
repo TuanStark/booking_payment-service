@@ -1,0 +1,35 @@
+version: '3.9'
+
+services:
+  payment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder # Tùy chọn build stage chứa toàn bộ devDependencies
+    container_name: payment-service-dev
+    ports:
+      - "3006:3006"
+    env_file:
+      - .env
+    volumes:
+      # Mount source code local vào container để reload lập tức
+      - ./:/app 
+      # Giữ lại node_modules riêng bên trong container
+      - /app/node_modules 
+    user: node
+    # Lệnh hot-reload của NestJS (tự biên dịch lại khi code thay đổi)
+    command: npm run start:dev 
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      my_custom_network:
+        ipv4_address: ${APP_IP}
+
+networks:
+  my_custom_network:
+    external: true
