@@ -135,15 +135,15 @@ export class PaymentsService {
         userId,
         bookingId: dto.bookingId,
         amount: dto.amount,
-        method,
+        method: method as any,
         qrImageUrl,
         paymentUrl,
         reference, // ← Với VNPay là vnp_TxnRef, với VietQR/PayOS là reference/orderCode
         transactionId: reference,
         orderCode: orderCode, // Save BigInt orderCode
         paymentDate: new Date(),
-        status: PaymentStatus.PENDING,
-      },
+        status: PaymentStatus.PENDING as any,
+      } as any,
     });
 
     this.logger.log(
@@ -176,7 +176,7 @@ export class PaymentsService {
           { reference: refString },
           { orderCode: BigInt(orderCode) }
         ],
-        method: PaymentMethod.PAYOS
+        method: PaymentMethod.PAYOS as any
       },
     });
 
@@ -219,7 +219,7 @@ export class PaymentsService {
     // For redirect, we just update UI status, but double check with DB
 
     const payment = await this.prisma.payment.findFirst({
-      where: { reference: orderId, method: PaymentMethod.MOMO },
+      where: { reference: orderId, method: PaymentMethod.MOMO as any },
     });
 
     if (!payment) {
@@ -265,7 +265,7 @@ export class PaymentsService {
     const { orderId, resultCode, amount, transId } = body;
 
     const payment = await this.prisma.payment.findFirst({
-      where: { reference: orderId, method: PaymentMethod.MOMO },
+      where: { reference: orderId, method: PaymentMethod.MOMO as any },
     });
 
     if (!payment) {
@@ -621,31 +621,9 @@ export class PaymentsService {
         PaymentStatus.SUCCESS,
         data.paymentLinkId || undefined,
       );
-      const topic = 'payment.success';
-      await this.rabbitmq.emitPaymentEvent(topic, {
-        paymentId: payment.id,
-        bookingId: payment.bookingId,
-        amount: payment.amount,
-        status: payment.status,
-        transactionId: payment.transactionId || undefined,
-        reference: payment.reference || undefined,
-      });
-
-      this.logger.log(`Payment ${payment.id} => ${payment.status}, published ${topic}`);
     } else {
       this.logger.warn(`[handleVietqrWebhook] Payment failed ref=${reference} code=${code} desc=${desc}`);
       await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED);
-      const topic = 'payment.failed';
-      await this.rabbitmq.emitPaymentEvent(topic, {
-        paymentId: payment.id,
-        bookingId: payment.bookingId,
-        amount: payment.amount,
-        status: payment.status,
-        transactionId: payment.transactionId || undefined,
-        reference: payment.reference || undefined,
-      });
-
-      this.logger.log(`Payment ${payment.id} => ${payment.status}, published ${topic}`);
     }
 
     return { success: true };
@@ -782,28 +760,7 @@ export class PaymentsService {
     if (vnpResponseCode === '00') {
       // Payment successful
       this.logger.log(`[handleVNPayReturn] Payment success ref=${vnpTxnRef}`);
-
-      // Update payment status
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: PaymentStatus.SUCCESS,
-          transactionId: vnpTransactionNo,
-          paymentDate: new Date(),
-        },
-      });
-
-      // Emit RabbitMQ event for booking service
-      await this.rabbitmq.emitPaymentEvent('payment.success', {
-        paymentId: payment.id,
-        bookingId: payment.bookingId,
-        amount: payment.amount,
-        status: PaymentStatus.SUCCESS,
-        transactionId: vnpTransactionNo,
-        reference: vnpTxnRef,
-      });
-
-      this.logger.log(`[handleVNPayReturn] Payment ${payment.id} => SUCCESS, published payment.success`);
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.SUCCESS, vnpTransactionNo);
 
       return {
         success: true,
@@ -815,27 +772,7 @@ export class PaymentsService {
     } else {
       // Payment failed
       this.logger.warn(`[handleVNPayReturn] Payment failed ref=${vnpTxnRef} code=${vnpResponseCode}`);
-
-      // Update payment status
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: PaymentStatus.FAILED,
-          transactionId: vnpTransactionNo || undefined,
-        },
-      });
-
-      // Emit RabbitMQ event
-      await this.rabbitmq.emitPaymentEvent('payment.failed', {
-        paymentId: payment.id,
-        bookingId: payment.bookingId,
-        amount: payment.amount,
-        status: PaymentStatus.FAILED,
-        transactionId: vnpTransactionNo || undefined,
-        reference: vnpTxnRef,
-      });
-
-      this.logger.log(`[handleVNPayReturn] Payment ${payment.id} => FAILED, published payment.failed`);
+      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED, vnpTransactionNo || undefined);
 
       return {
         success: false,
@@ -892,47 +829,10 @@ export class PaymentsService {
 
       // 6. Update status based on response code
       if (vnpResponseCode === '00') {
-        // Success
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: PaymentStatus.SUCCESS,
-            transactionId: vnpTransactionNo,
-            paymentDate: new Date(),
-          },
-        });
-
-        // Emit message to RabbitMQ
-        await this.rabbitmq.emitPaymentEvent('payment.success', {
-          paymentId: payment.id,
-          bookingId: payment.bookingId,
-          amount: payment.amount,
-          status: PaymentStatus.SUCCESS,
-          transactionId: vnpTransactionNo,
-          reference: vnpTxnRef,
-        });
-
+        await this.updateStatusByPaymentId(payment.id, PaymentStatus.SUCCESS, vnpTransactionNo);
         this.logger.log(`[handleVNPayIpn] Payment SUCCESS confirmed ref=${vnpTxnRef}`);
       } else {
-        // Failed
-        await this.prisma.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: PaymentStatus.FAILED,
-            transactionId: vnpTransactionNo || undefined,
-          },
-        });
-
-        // Emit message to RabbitMQ
-        await this.rabbitmq.emitPaymentEvent('payment.failed', {
-          paymentId: payment.id,
-          bookingId: payment.bookingId,
-          amount: payment.amount,
-          status: PaymentStatus.FAILED,
-          transactionId: vnpTransactionNo || undefined,
-          reference: vnpTxnRef,
-        });
-
+        await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED, vnpTransactionNo || undefined);
         this.logger.log(`[handleVNPayIpn] Payment FAILED confirmed ref=${vnpTxnRef} code=${vnpResponseCode}`);
       }
 
