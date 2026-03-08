@@ -58,7 +58,15 @@ export class RabbitMQProducerService implements OnModuleInit, OnModuleDestroy {
         throw new Error('RabbitMQ channel is not available');
       }
 
-      await this.channelWrapper.publish(this.exchange, topic, data);
+      const payload = {
+        pattern: topic,
+        data: data,
+      };
+
+      await this.channelWrapper.publish(this.exchange, topic, Buffer.from(JSON.stringify(payload)), {
+        persistent: true,
+        contentType: 'application/json',
+      } as any);
 
       this.logger.log(`✅ Payment event published to ${topic}: ${JSON.stringify(data)}`);
     } catch (error: any) {
@@ -73,7 +81,15 @@ export class RabbitMQProducerService implements OnModuleInit, OnModuleDestroy {
         throw new Error('RabbitMQ channel is not available');
       }
 
-      await this.channelWrapper.publish(this.exchange, topic, data);
+      const payload = {
+        pattern: topic,
+        data: data,
+      };
+
+      await this.channelWrapper.publish(this.exchange, topic, Buffer.from(JSON.stringify(payload)), {
+        persistent: true,
+        contentType: 'application/json',
+      } as any);
 
       this.logger.log(`✅ Booking event published to ${topic}: ${JSON.stringify(data)}`);
     } catch (error: any) {
