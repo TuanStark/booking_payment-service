@@ -80,7 +80,7 @@ export class PaymentsService {
       // === VIETQR (giữ nguyên như cũ) ===
       const transactionId = generateBookingCode({});
       const vietqrResult = await this.vietqr.createPayment({
-        amount: dto.amount,
+        amount: Number(dto.amount), // Ensure amount is number for external provider
         bookingId: dto.bookingId,
       });
       qrImageUrl = vietqrResult.data.qrCode || undefined;
@@ -93,7 +93,7 @@ export class PaymentsService {
 
       const vnpayResult = await this.vnpay.createVNPayPayment({
         orderId: vnpTxnRef,
-        amount: dto.amount,
+        amount: Number(dto.amount), // Ensure amount is number for external provider
         orderInfo: `Thanh toan booking ${dto.bookingId}`,
         ipAddr,
         locale: 'vn',
@@ -103,7 +103,7 @@ export class PaymentsService {
       reference = vnpTxnRef;
     } else if (method === PaymentMethod.MOMO) {
       const momoResult = await this.momo.createMoMoPayment({
-        amount: dto.amount,
+        amount: Number(dto.amount), // Ensure amount is number for external provider
         orderId: `BK_${dto.bookingId}_${Date.now()}`, // Simple unique orderId
         orderInfo: `Thanh toan booking ${dto.bookingId}`,
         redirectUrl: this.configService.get('MOMO_REDIRECT_URL') || 'http://localhost:4000/payments/momo/return',
@@ -119,7 +119,7 @@ export class PaymentsService {
 
       const payosResult = await this.payos.createPaymentLink({
         orderCode: Number(orderCode),
-        amount: dto.amount,
+        amount: Number(dto.amount), // Ensure amount is number for external provider
         description: `Booking ${dto.bookingId}`,
         cancelUrl: this.configService.get<string>('FRONTEND_URL') + '/payment/cancel' || 'http://localhost:5173/payment/cancel',
         returnUrl: this.configService.get<string>('FRONTEND_URL') + '/payment/success' || 'http://localhost:5173/payment/success',
@@ -186,7 +186,7 @@ export class PaymentsService {
     }
 
     // Check amount
-    if (payment.amount !== amount) {
+    if (Number(payment.amount) !== amount) { // Convert Prisma Decimal to Number for comparison
       this.logger.warn(
         `[handlePayosWebhook] Amount mismatch orderCode=${orderCode} expected=${payment.amount} received=${amount}`,
       );
@@ -236,9 +236,24 @@ export class PaymentsService {
       status = PaymentStatus.FAILED;
     }
 
-    // Only update if not already success (IPN might have come first)
-    if (payment.status !== PaymentStatus.SUCCESS) {
-      await this.updateStatusByPaymentId(payment.id, status);
+    // [Idempotency] Only update if not already success/failed (IPN might have come first)
+    // We use Prisma updateMany to ensure Row-Level Lock concurrency control
+    const updatedCount = await this.prisma.payment.updateMany({
+      where: {
+        id: payment.id,
+        status: PaymentStatus.PENDING as any,
+      },
+      data: {
+        status: status as any,
+      },
+    });
+
+    // If updateMany returns count: 1, it means we WIN the race condition -> We publish event
+    if (updatedCount.count > 0) {
+      this.logger.log(`[handleMomoReturn] Successfully updated DB to ${status}. Publishing Event...`);
+      await this.publishPaymentStatusEvent(payment, status, undefined);
+    } else {
+      this.logger.log(`[handleMomoReturn] Duplicate/Late Webhook. Payment was already processed. Skipped.`);
     }
 
     return {
@@ -273,47 +288,89 @@ export class PaymentsService {
       return { status: 404, message: 'Payment not found' };
     }
 
-    if (payment.amount !== amount) {
-      this.logger.warn(`[handleMomoIpn] Amount mismatch`);
-      // Continue or fail?
+    // SECURITY RISK: AMOUNT MISMATCH MUST TRIGGER IMMEDIATE FAILURE!
+    let forceFailed = false;
+    if (Number(payment.amount) !== Number(amount)) {
+      this.logger.error(`[handleMomoIpn] CRITICAL RISK - Amount mismatch! Expected: ${payment.amount}, Received: ${amount}. Marking as FAILED.`);
+      forceFailed = true;
     }
 
-    if (resultCode === 0) {
-      await this.updateStatusByPaymentId(payment.id, PaymentStatus.SUCCESS, transId.toString());
+    let status = PaymentStatus.PENDING;
+    if (!forceFailed && resultCode === 0) {
+      status = PaymentStatus.SUCCESS;
     } else {
-      await this.updateStatusByPaymentId(payment.id, PaymentStatus.FAILED, transId.toString());
+      status = PaymentStatus.FAILED;
+    }
+
+    // [Idempotency] Prevent race conditions using DB atomic conditional update
+    const updatedCount = await this.prisma.payment.updateMany({
+      where: {
+        id: payment.id,
+        status: PaymentStatus.PENDING as any, // Only update if it is currently PENDING
+      },
+      data: {
+        status: status as any,
+        transactionId: transId ? transId.toString() : undefined,
+      },
+    });
+
+    if (updatedCount.count > 0) {
+      this.logger.log(`[handleMomoIpn] Successfully updated DB to ${status}. Publishing Event...`);
+      await this.publishPaymentStatusEvent(payment, status, transId?.toString());
+    } else {
+      this.logger.log(`[handleMomoIpn] Duplicate/Late IPN. Payment was already processed. Skipped.`);
     }
 
     return { status: 204 }; // Momo expects 204 No Content for success
   }
 
-  // update status and publish rabbitmq
+  // Extract generic RabbitMQ event publishing logic for use in idempotency check
+  private async publishPaymentStatusEvent(
+    payment: any,
+    status: PaymentStatus,
+    transactionId?: string,
+  ) {
+    const payload = {
+      paymentId: payment.id,
+      bookingId: payment.bookingId,
+      amount: Number(payment.amount),
+      status,
+      transactionId: transactionId || payment.transactionId,
+      reference: payment.reference,
+    };
+
+    if (status === PaymentStatus.SUCCESS) {
+      await this.rabbitmq.emitPaymentEvent('payment.success', payload);
+      this.logger.log(`[Payments] Event Published -> payment.success ${payment.id}`);
+    } else if (status === PaymentStatus.FAILED) {
+      await this.rabbitmq.emitPaymentEvent('payment.failed', payload);
+      this.logger.log(`[Payments] Event Published -> payment.failed ${payment.id}`);
+    }
+  }
+
+  // update status and publish rabbitmq 
+  // IMPORTANT: Older method used by other gateways. Should be refactored eventually if they face RC issues.
   async updateStatusByPaymentId(
     paymentId: string,
     status: PaymentStatus,
     transactionId?: string,
   ) {
+    // Standard update bypasses Race Condition Lock by design. Only MOMO is fixed right now.
     const payment = await this.prisma.payment.update({
       where: { id: paymentId },
       data: {
-        status,
+        status: status as any,
         transactionId: transactionId ?? undefined,
-        paymentDate: status === PaymentStatus.SUCCESS ? new Date() : undefined,
       },
     });
 
-    const topic =
-      status === PaymentStatus.SUCCESS ? 'payment.success' : 'payment.failed';
-    await this.rabbitmq.emitPaymentEvent(topic, {
-      paymentId: payment.id,
-      bookingId: payment.bookingId,
-      amount: payment.amount,
-      status: payment.status,
-      transactionId: payment.transactionId || undefined,
-      reference: payment.reference || undefined,
-    });
+    this.logger.log(
+      `[updateStatusByPaymentId] Payment ${paymentId} updated to ${status}`,
+    );
 
-    this.logger.log(`Payment ${paymentId} => ${status}, published ${topic}`);
+    // Bắn event qua RabbitMQ qua helper chung
+    await this.publishPaymentStatusEvent(payment, status, transactionId);
+
     return payment;
   }
 
@@ -512,9 +569,9 @@ export class PaymentsService {
       const paymentDate = new Date(payment.createdAt);
       const monthIndex = paymentDate.getMonth();
       const monthKey = monthNames[monthIndex];
-
+      // Aggregate amount
       const currentAmount = monthlyData.get(monthKey) || 0;
-      monthlyData.set(monthKey, currentAmount + payment.amount);
+      monthlyData.set(monthKey, currentAmount + Number(payment.amount));
     });
 
     // Format response
@@ -601,7 +658,7 @@ export class PaymentsService {
     }
 
     // Check amount
-    if (payment.amount !== amount) {
+    if (Number(payment.amount) !== amount) {
       this.logger.warn(
         `[handleVietqrWebhook] Amount mismatch ref=${reference} expected=${payment.amount} received=${amount}`,
       );
@@ -647,7 +704,7 @@ export class PaymentsService {
         }),
       ]);
 
-    const totalRevenue = totalRevenueResult._sum.amount || 0;
+    const totalRevenue = Number(totalRevenueResult._sum.amount || 0);
 
     // Get monthly revenue using existing method
     const monthlyRevenueData = await this.getMonthlyRevenue({
@@ -677,8 +734,8 @@ export class PaymentsService {
       }),
     ]);
 
-    const thisMonthAmount = revenueThisMonth._sum.amount || 0;
-    const lastMonthAmount = revenueLastMonth._sum.amount || 0;
+    const thisMonthAmount = Number(revenueThisMonth._sum.amount || 0);
+    const lastMonthAmount = Number(revenueLastMonth._sum.amount || 0);
 
     const revenueGrowth =
       lastMonthAmount > 0
@@ -749,7 +806,7 @@ export class PaymentsService {
     }
 
     // Check amount match
-    if (payment.amount !== vnpAmount) {
+    if (Number(payment.amount) !== vnpAmount) {
       this.logger.warn(
         `[handleVNPayReturn] Amount mismatch ref=${vnpTxnRef} expected=${payment.amount} received=${vnpAmount}`,
       );
@@ -816,7 +873,7 @@ export class PaymentsService {
       }
 
       // 4. Check amount
-      if (payment.amount !== vnpAmount) {
+      if (Number(payment.amount) !== vnpAmount) {
         this.logger.warn(`[handleVNPayIpn] Amount mismatch ref=${vnpTxnRef} expected=${payment.amount} received=${vnpAmount}`);
         return { RspCode: '04', Message: 'Amount mismatch' };
       }
@@ -837,7 +894,7 @@ export class PaymentsService {
       }
 
       return { RspCode: '00', Message: 'Confirm Success' };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[handleVNPayIpn] Error: ${error.message}`, error.stack);
       return { RspCode: '99', Message: 'Unknown error' };
     }

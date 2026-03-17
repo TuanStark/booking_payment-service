@@ -27,7 +27,7 @@ model Payment {
   id            String        @id @default(uuid())
   userId        String        @map("user_id")
   bookingId     String        @map("booking_id")
-  amount        Float
+  amount        Decimal
   method        PaymentMethod
   qrImageUrl    String?       @map("qr_image_url") // QR cho VietQR/ZaloPay/MoMo/PayOs nếu cần
   paymentUrl    String?       @map("payment_url") // Redirect URL cho VNPay/MoMo/ZaloPay/PayOs
@@ -43,6 +43,7 @@ model Payment {
 
   details PaymentDetails?
 
+  @@unique([method, reference], name: "unique_method_reference") // Prevent duplicate IPs/redirects hitting race conditions and creating dupes
   @@index([bookingId])
   @@index([userId])
   @@index([status])
@@ -63,7 +64,7 @@ model PaymentDetails {
   subsPlanId     String?   @map("subs_plan_id") // e.g. 'premium_monthly'
 
   // Refund info (chung cho tất cả provider)
-  refundAmount Float?    @map("refund_amount")
+  refundAmount Decimal?  @map("refund_amount")
   refundDate   DateTime? @map("refund_date")
   refundReason String?   @map("refund_reason")
 
