@@ -35,7 +35,6 @@ export class RabbitMQProducerService implements OnModuleInit, OnModuleDestroy {
     this.connection.on('disconnect', err => this.logger.error('Disconnected from RabbitMQ.', err));
 
     this.channelWrapper = this.connection.createChannel({
-      json: true,
       setup: async (channel: ConfirmChannel) => {
         // 1. Assert Topic Exchange
         await channel.assertExchange(this.exchange, 'topic', { durable: true });
@@ -44,8 +43,8 @@ export class RabbitMQProducerService implements OnModuleInit, OnModuleDestroy {
         await channel.assertQueue(this.queue, { durable: true });
 
         // 3. Bind Queue to Exchange with routing keys this service needs to listen to
-        // Payment Service needs to listen to booking.created events
         await channel.bindQueue(this.queue, this.exchange, 'booking.created');
+        await channel.bindQueue(this.queue, this.exchange, 'booking.canceled');
 
         this.logger.log(`RabbitMQ Topology Setup: Exchange=${this.exchange}, Queue=${this.queue}`);
       },
