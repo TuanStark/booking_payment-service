@@ -397,17 +397,34 @@ export class PaymentsService {
     const take = limitNumber;
     const skip = (pageNumber - 1) * take;
 
-    const searchUpCase = search.charAt(0).toUpperCase() + search.slice(1);
-    const where = search
-      ? {
+    // --- Build WHERE clause ---
+    const conditions: any[] = [];
+
+    // Search across userId, bookingId, reference, transactionId
+    if (search) {
+      conditions.push({
         OR: [
-          { userId: { contains: searchUpCase } },
-          { bookingId: { contains: searchUpCase } },
-          { reference: { contains: searchUpCase } },
-          { transactionId: { contains: searchUpCase } },
+          { userId: { contains: search, mode: 'insensitive' } },
+          { bookingId: { contains: search, mode: 'insensitive' } },
+          { reference: { contains: search, mode: 'insensitive' } },
+          { transactionId: { contains: search, mode: 'insensitive' } },
         ],
-      }
-      : {};
+      });
+    }
+
+    // Filter by payment method (e.g. 'MOMO', 'VNPAY', etc.)
+    const method = query.method;
+    if (method) {
+      conditions.push({ method: method.toUpperCase() });
+    }
+
+    // Filter by payment status (e.g. 'PENDING', 'SUCCESS', 'FAILED')
+    const status = query.status;
+    if (status) {
+      conditions.push({ status: status.toUpperCase() });
+    }
+
+    const where = conditions.length > 0 ? { AND: conditions } : {};
     const orderBy = { [sortBy]: sortOrder };
 
     const [payments, total] = await Promise.all([
